@@ -1,0 +1,12 @@
+{
+  "name": "agentic-ai-world-builder",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Killhouse: a browser shooter whose levels are designed by an AI director agent.",
+  "scripts": {
+    "dev": "vercel dev",
+    "deploy": "vercel --prod"
+  },
+  "engines": { "node": ">=18" }
+}

@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="description" content="Cinematic 3D shooter where AI agents direct every level and command every NPC.">
+</head>
+<body>
+<title>Killhouse Director</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=Chakra+Petch:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
+<style>
+/* Layout: full-bleed WebGL theatre. Menus are dossier panels; the briefing becomes a film poster laid over the live 3D world. HUD hugs the corners. */
+:root{
+  --bg:#07090a; --panel:rgba(13,17,15,.92); --line:rgba(226,232,216,.14); --fg:#e6ebdd; --muted:#97a28c;
+  --accent:#e9a43b; --danger:#ff5a46; --ok:#82c46c; --ally:#7cc8ff; --foe:#ff8a7a;
+  --poster:"Big Shoulders Display","Arial Narrow",Impact,sans-serif;
+  --display:"Chakra Petch","Arial Narrow",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  color-scheme:dark;
+}
+[hidden]{display:none!important}
+html,body{height:100%}
+body{background:var(--bg);color:var(--fg);font-family:var(--display);overflow:hidden;-webkit-user-select:none;user-select:none}
+#app{position:fixed;inset:0}
+canvas#game{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none}
+
+.screen{position:absolute;inset:0;overflow-y:auto;display:flex;align-items:flex-start;justify-content:center;z-index:5;
+  padding-block:max(24px,env(safe-area-inset-top,0px)) max(24px,env(safe-area-inset-bottom,0px));
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  background:radial-gradient(1100px 700px at 75% 0%,rgba(233,164,59,.10),transparent 60%),rgba(5,7,6,.9);-webkit-user-select:text;user-select:text}
+.panel{width:100%;max-width:780px;margin-block:auto;background:var(--panel);border:1px solid var(--line);position:relative;padding:28px clamp(18px,4vw,38px) 26px;backdrop-filter:blur(6px)}
+.panel::before,.panel::after{content:"";position:absolute;width:18px;height:18px;border:2px solid var(--accent)}
+.panel::before{top:-2px;left:-2px;border-right:0;border-bottom:0}.panel::after{bottom:-2px;right:-2px;border-left:0;border-top:0}
+.eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted)}
+h1{font-family:var(--poster);font-weight:900;font-size:clamp(58px,12vw,118px);line-height:.82;margin:.12em 0 .14em;letter-spacing:.01em}
+h1 span{color:var(--accent)}
+h2{font-family:var(--poster);font-weight:900;font-size:clamp(34px,6vw,54px);line-height:.9;margin:.15em 0;letter-spacing:.02em;text-wrap:balance}
+p{line-height:1.5;max-width:62ch;margin:.5em 0;color:#cdd5c2}
+.chip{display:inline-flex;align-items:center;gap:8px;font-family:var(--mono);font-size:12px;padding:6px 10px;border:1px solid var(--line);background:rgba(0,0,0,.35)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex:none}.dot.on{background:var(--ok);box-shadow:0 0 8px var(--ok)}.dot.warn{background:var(--accent)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:18px 22px;margin-top:22px}
+.f{display:flex;flex-direction:column;gap:8px;font-family:var(--mono);font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.f output{color:var(--accent);font-size:22px;font-family:var(--display);letter-spacing:0}
+input[type=text]{font:600 18px var(--display);background:#0b0f0a;color:var(--fg);border:1px solid var(--line);padding:10px 12px;outline:none}
+input[type=text]:focus-visible{border-color:var(--accent)}
+input[type=range]{accent-color:var(--accent);width:100%}
+.seg{display:flex;border:1px solid var(--line)}
+.seg button{flex:1;font:600 13px var(--display);letter-spacing:.06em;text-transform:uppercase;padding:10px 8px;background:#0b0f0a;color:var(--muted);border:0;cursor:pointer}
+.seg button[aria-pressed=true]{background:var(--accent);color:#16110a}
+.row{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-top:24px}
+.btn{font:700 16px var(--display);letter-spacing:.12em;text-transform:uppercase;padding:14px 24px;border:1px solid var(--accent);background:var(--accent);color:#17110a;cursor:pointer;clip-path:polygon(10px 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%,0 10px)}
+.btn:hover{filter:brightness(1.08)}.btn.ghost{background:rgba(0,0,0,.3);color:var(--fg);border-color:var(--line)}
+.btn:focus-visible,.seg button:focus-visible,.small:focus-visible{outline:2px solid var(--fg);outline-offset:2px}
+.small{font:600 12px var(--mono);background:rgba(0,0,0,.4);color:var(--fg);border:1px solid var(--line);padding:7px 10px;cursor:pointer;pointer-events:auto}
+.keys{display:flex;flex-wrap:wrap;gap:8px 18px;margin-top:22px;font-family:var(--mono);font-size:12px;color:var(--muted)}
+kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-bottom-width:2px;padding:1px 6px;color:var(--fg);background:#0e130c}
+.features{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);margin-top:20px}
+.features div{background:rgba(9,12,10,.95);padding:12px 14px;font-size:13px;line-height:1.45;color:#c7cfbc;min-width:0}
+.features b{display:block;font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin-bottom:4px}
+
+.term{font-family:var(--mono);font-size:12px;line-height:1.55;background:#050705;border:1px solid var(--line);padding:12px 14px;margin-top:16px;max-height:230px;overflow:auto;color:#9fb08f;white-space:pre-wrap;word-break:break-word}
+.term .hi{color:var(--accent)}.term .raw{color:#56634c}
+
+/* poster */
+#briefing.poster{background:linear-gradient(180deg,rgba(0,0,0,.05) 0%,rgba(0,0,0,.15) 35%,rgba(4,5,5,.88) 72%,rgba(4,5,5,.97) 100%);align-items:flex-end}
+#briefing.poster .panel{background:transparent;border:0;backdrop-filter:none;max-width:1100px;padding-inline:0}
+#briefing.poster .panel::before,#briefing.poster .panel::after{display:none}
+.pgenre{font-family:var(--mono);font-size:12px;letter-spacing:.22em;text-transform:uppercase;color:var(--accent);text-shadow:0 1px 6px #000}
+.ptitle{font-family:var(--poster);font-weight:900;font-size:clamp(56px,11vw,150px);line-height:.8;letter-spacing:.005em;margin:.08em 0 .1em;text-shadow:0 4px 30px rgba(0,0,0,.6);text-wrap:balance}
+.ptag{font-family:var(--display);font-style:italic;font-size:clamp(18px,2.4vw,26px);color:#fff;margin:0 0 .4em;text-shadow:0 2px 10px #000}
+.plog{max-width:70ch;color:#d8decf;text-shadow:0 1px 8px #000}
+.billing{margin-top:18px;border-top:1px solid rgba(255,255,255,.18);padding-top:12px}
+.billing ul{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:4px 18px;font-family:var(--poster);font-weight:700;font-size:15px;letter-spacing:.08em;text-transform:uppercase;color:#bfc6b5}
+.billing li{white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.billing li span{font-family:var(--mono);font-weight:400;font-size:10.5px;letter-spacing:.04em;text-transform:none;color:#8d9784}
+.billing b.ally{color:var(--ally)}.billing b.foe{color:var(--foe)}
+.billing .intro{font-family:var(--display);font-style:italic;color:var(--accent);margin-top:6px;font-size:14px}
+.intel{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:1px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.12);margin-top:16px}
+.intel>div{background:rgba(6,8,7,.85);padding:9px 12px;display:flex;flex-direction:column;gap:3px;min-width:0}
+.intel b{font-size:20px;font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.intel span{font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.why{font-family:var(--mono);font-size:12px;color:#aab49f;border-left:2px solid var(--accent);padding-left:10px;margin-top:12px}
+
+/* HUD */
+#hud{position:absolute;inset:0;pointer-events:none;z-index:3}
+.tl{position:absolute;top:calc(14px + env(safe-area-inset-top,0px));left:max(16px,env(safe-area-inset-left,0px));max-width:min(46vw,460px)}
+.tr{position:absolute;top:calc(14px + env(safe-area-inset-top,0px));right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;align-items:flex-end;gap:8px}
+.bl{position:absolute;bottom:calc(16px + env(safe-area-inset-bottom,0px));left:max(16px,env(safe-area-inset-left,0px));display:flex;gap:14px;align-items:flex-end}
+.br{position:absolute;bottom:calc(16px + env(safe-area-inset-bottom,0px));right:max(16px,env(safe-area-inset-right,0px));text-align:right}
+.htitle{font-family:var(--poster);font-weight:900;font-size:22px;letter-spacing:.04em;line-height:1;text-shadow:0 2px 6px #000}
+.sub{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#d5dccb;text-shadow:0 1px 3px #000}
+.obj{font-size:14px;margin-top:6px;text-shadow:0 1px 3px #000;color:#fff}
+.obj::before{content:"";display:inline-block;width:8px;height:8px;background:var(--accent);margin-right:8px;transform:rotate(45deg)}
+#hCreature{color:#ffb070}
+#compass{position:absolute;top:calc(12px + env(safe-area-inset-top,0px));left:50%;transform:translateX(-50%);width:min(360px,50vw);height:26px;overflow:hidden;
+  -webkit-mask-image:linear-gradient(90deg,transparent,#000 20%,#000 80%,transparent);mask-image:linear-gradient(90deg,transparent,#000 20%,#000 80%,transparent)}
+#compassStrip{position:absolute;left:50%;top:0;height:100%;white-space:nowrap}
+#compassStrip i{position:absolute;top:0;width:1px;height:6px;background:rgba(255,255,255,.6)}
+#compassStrip b{position:absolute;top:7px;transform:translateX(-50%);font:600 12px var(--mono);color:#fff;text-shadow:0 1px 2px #000}
+#compassStrip b.c{color:var(--accent)}
+#compass::after{content:"";position:absolute;left:50%;top:0;width:2px;height:10px;background:var(--accent);transform:translateX(-50%)}
+#radar{width:150px;height:150px}
+#hostiles{font-family:var(--mono);font-size:11px;letter-spacing:.1em;color:#fff;background:rgba(150,30,20,.6);padding:4px 9px}
+#killfeed{display:flex;flex-direction:column;gap:3px;align-items:flex-end;font-family:var(--mono);font-size:12px}
+#killfeed div{background:rgba(0,0,0,.55);padding:3px 9px;border-right:2px solid var(--accent)}
+.commsbox{width:min(380px,46vw)}
+#cmdSrc{font-family:var(--mono);font-size:10px;letter-spacing:.16em;color:var(--accent);margin-bottom:4px;text-shadow:0 1px 2px #000}
+#comms{display:flex;flex-direction:column;gap:3px;font-family:var(--mono);font-size:12px;line-height:1.35}
+#comms div{background:linear-gradient(90deg,rgba(0,0,0,.6),rgba(0,0,0,.15));padding:4px 8px;border-left:2px solid rgba(255,255,255,.3);transition:opacity 1s}
+#comms div.old{opacity:.35}
+.hp{width:min(240px,40vw);height:9px;background:rgba(0,0,0,.55);border:1px solid rgba(255,255,255,.25);margin-top:6px;transform:skewX(-18deg)}
+.hp i{display:block;height:100%;background:var(--fg);transition:width .15s}
+.ammo{font-family:var(--poster);font-weight:900;font-size:58px;line-height:.9;font-variant-numeric:tabular-nums;text-shadow:0 2px 6px #000}
+.ammo small{font-size:22px;color:#cfd8c4}
+#cross{position:absolute;left:50%;top:50%;width:0;height:0;--s:10px}
+#cross i{position:absolute;background:#fff;box-shadow:0 0 2px #000;transition:transform .05s}
+#cross i:nth-child(1){width:10px;height:2px;right:var(--s);top:-1px}#cross i:nth-child(2){width:10px;height:2px;left:var(--s);top:-1px}
+#cross i:nth-child(3){width:2px;height:10px;left:-1px;bottom:var(--s)}#cross i:nth-child(4){width:2px;height:10px;left:-1px;top:var(--s)}
+#cross.ads i{opacity:.0}#cross::after{content:"";position:absolute;width:3px;height:3px;left:-1.5px;top:-1.5px;background:#fff;border-radius:50%;opacity:.7}
+#cross em{position:absolute;left:-9px;top:-9px;width:18px;height:18px;opacity:0;background:
+  linear-gradient(45deg,transparent 45%,#fff 45% 55%,transparent 55%),linear-gradient(-45deg,transparent 45%,#fff 45% 55%,transparent 55%);-webkit-mask:radial-gradient(circle,transparent 4px,#000 5px);mask:radial-gradient(circle,transparent 4px,#000 5px)}
+#cross.hit em{opacity:1}#cross.kill em{opacity:1;filter:drop-shadow(0 0 2px #f00) sepia(1) saturate(9) hue-rotate(-50deg)}#cross.head em{transform:scale(1.4)}
+#dmgDir{position:absolute;left:50%;top:50%;width:240px;height:240px;opacity:0;pointer-events:none;transition:opacity .2s}
+#dmgDir::before{content:"";position:absolute;left:50%;top:0;width:70px;height:20px;transform:translateX(-50%);background:radial-gradient(ellipse at 50% 0%,rgba(255,40,30,.9),transparent 70%)}
+#vignette{position:absolute;inset:0;opacity:0;background:radial-gradient(ellipse at center,transparent 45%,rgba(150,0,0,.85) 100%)}
+#suppress{position:absolute;inset:0;opacity:0;background:radial-gradient(ellipse at center,transparent 55%,rgba(0,0,0,.8) 100%);transition:opacity .2s}
+#banner{position:absolute;left:50%;top:24%;transform:translateX(-50%);text-align:center;opacity:0;transition:opacity .4s;width:min(90vw,900px)}
+#banner.show{opacity:1}
+#banner .big{font-family:var(--poster);font-weight:900;font-size:clamp(30px,6vw,64px);letter-spacing:.06em;text-shadow:0 2px 14px #000;line-height:1}
+#subtitle{position:absolute;left:50%;bottom:calc(120px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);width:min(80vw,760px);text-align:center;font-style:italic;font-size:18px;color:#fff;text-shadow:0 2px 8px #000;opacity:0;transition:opacity .6s}
+#subtitle.show{opacity:1}
+#letterbox::before,#letterbox::after{content:"";position:absolute;left:0;right:0;height:0;background:#000;transition:height .8s;z-index:4}
+#letterbox::before{top:0}#letterbox::after{bottom:0}
+#letterbox.on::before,#letterbox.on::after{height:11vh}
+#intro{position:absolute;left:0;right:0;bottom:15vh;text-align:center;z-index:4;opacity:0;transition:opacity 1s;pointer-events:none;padding-inline:16px}
+#intro.show{opacity:1}
+#introTitle{font-family:var(--poster);font-weight:900;font-size:clamp(44px,9vw,110px);line-height:.85;text-shadow:0 4px 24px #000}
+#introSub{font-family:var(--mono);font-size:12px;letter-spacing:.2em;text-transform:uppercase;margin-top:10px;color:#e8e0cc;text-shadow:0 1px 4px #000}
+#introSkip{font-family:var(--mono);font-size:11px;color:#aaa;margin-top:18px;letter-spacing:.1em}
+.touchbtns{display:none}
+body.touch .touchbtns{display:flex;position:absolute;right:max(16px,env(safe-area-inset-right,0px));bottom:calc(110px + env(safe-area-inset-bottom,0px));flex-direction:column;gap:10px;pointer-events:auto;z-index:6}
+.touchbtns button{width:64px;height:64px;border-radius:50%;border:1px solid rgba(255,255,255,.35);background:rgba(0,0,0,.35);color:#fff;font:700 11px var(--mono)}
+.touchbtns #tFire{width:82px;height:82px;background:rgba(233,164,59,.35)}
+@media (max-width:620px){#radar{width:110px;height:110px}.ammo{font-size:40px}.commsbox{display:none}.htitle{font-size:20px}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div id="app">
+  <canvas id="game"></canvas>
+  <div id="letterbox"></div>
+  <div id="intro"><div id="introTitle"></div><div id="introSub"></div><div id="introSkip">Click or press Space to skip</div></div>
+
+  <div id="hud" hidden>
+    <div id="vignette"></div><div id="suppress"></div>
+    <div id="compass"><div id="compassStrip"></div></div>
+    <div class="tl">
+      <div class="htitle" id="hTitle"></div>
+      <div class="sub" id="hSub"></div>
+      <div class="obj" id="hObj"></div>
+      <div class="sub" id="hCreature" style="margin-top:4px"></div>
+    </div>
+    <div class="tr"><div id="hostiles"></div><div id="killfeed"></div></div>
+    <div class="bl">
+      <canvas id="radar" width="150" height="150"></canvas>
+      <div>
+        <div class="commsbox"><div id="cmdSrc">COMMANDER</div><div id="comms"></div></div>
+        <div class="sub" style="margin-top:10px">HEALTH</div>
+        <div class="hp"><i id="hHp" style="width:100%"></i></div>
+      </div>
+    </div>
+    <div class="br"><div class="ammo" id="hAmmo">30<small> / ∞</small></div><div class="sub">MK-7 CARBINE</div><button class="small" id="pauseBtn" type="button" style="margin-top:8px">Pause</button></div>
+    <div id="cross"><i></i><i></i><i></i><i></i><em></em></div>
+    <div id="dmgDir"></div>
+    <div id="banner"><div class="big" id="bannerText"></div><div class="sub" id="bannerSub"></div></div>
+    <div id="subtitle"></div>
+    <div class="touchbtns"><button id="tAds" type="button">AIM</button><button id="tReload" type="button">RLD</button><button id="tJump" type="button">JUMP</button><button id="tFire" type="button">FIRE</button></div>
+  </div>
+
+  <section class="screen" id="menu">
+    <div class="panel">
+      <div class="eyebrow">AI-directed cinematic shooter</div>
+      <h1>KILL<span>HOUSE</span></h1>
+      <p>Every level is a new film. A director agent writes the world, the weather, the monster and the cast. A commander agent runs the battle in real time, and every NPC thinks for itself.</p>
+      <div class="row" style="margin-top:12px"><span class="chip"><i class="dot warn" id="dirDot"></i><span id="dirStatus">Connecting to the agents…</span></span></div>
+      <div class="grid">
+        <label class="f">Callsign<input id="callsign" type="text" maxlength="14" value="REAPER"></label>
+        <label class="f">NPC operators <output id="npcOut">6</output><input id="npcs" type="range" min="1" max="16" value="6"></label>
+        <label class="f">Levels <output id="lvlOut">3</output><input id="levels" type="range" min="1" max="10" value="3"></label>
+        <div class="f">Mode<div class="seg" role="group" aria-label="Game mode"><button type="button" id="modeFfa" aria-pressed="true">Free-for-all</button><button type="button" id="modeTdm" aria-pressed="false">Team DM</button></div></div>
+        <div class="f">Graphics<div class="seg" role="group" aria-label="Graphics quality"><button type="button" id="qualHigh" aria-pressed="true">Cinematic</button><button type="button" id="qualLow" aria-pressed="false">Performance</button></div></div>
+      </div>
+      <p class="eyebrow" id="modeHint" style="margin-top:12px;letter-spacing:.06em;text-transform:none;font-size:12px">Every operator fights everyone, you included. Last one standing clears the level.</p>
+      <div class="row"><button class="btn" id="startBtn" type="button">Direct level 1</button></div>
+      <div class="features">
+        <div><b>World Director</b>Eight cinematic worlds, from a jungle island ruled by a titan ape to a prison pit that drops hundreds of floors. Sky, weather, cast and events change every time.</div>
+        <div><b>Battle Commander</b>Reads the battlefield every few seconds and orders each NPC to flank, ambush, retreat or lure the monster, with radio lines in each operator's voice.</div>
+        <div><b>Agentic NPCs</b>Each operator sees, hears, remembers and reasons on its own: finds cover, paths around obstacles, calls out targets and loses nerve when friends fall.</div>
+      </div>
+      <div class="keys">
+        <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move</span><span><kbd>Mouse</kbd> look · <kbd>L-click</kbd> fire · <kbd>R-click</kbd> aim</span>
+        <span><kbd>Shift</kbd> sprint</span><span><kbd>C</kbd> crouch</span><span><kbd>Space</kbd> jump</span><span><kbd>R</kbd> reload</span><span><kbd>Esc</kbd> pause</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="screen" id="briefing" hidden>
+    <div class="panel">
+      <div id="bLoading">
+        <div class="eyebrow" id="bEyebrow"></div>
+        <h2>The director is writing your level</h2>
+        <div class="term" id="term" aria-live="polite"></div>
+        <div class="row"><button class="btn ghost" id="cancelGen" type="button">Use the offline director</button></div>
+      </div>
+      <div id="bReady" hidden>
+        <div class="pgenre" id="pGenre"></div>
+        <div class="ptitle" id="pTitle"></div>
+        <div class="ptag" id="pTag"></div>
+        <p class="plog" id="pLog"></p>
+        <div class="billing"><div class="eyebrow" id="pFactions" style="margin-bottom:6px"></div><ul id="pCast"></ul><div class="intro" id="pCreature"></div></div>
+        <div class="intel">
+          <div><span>Threat</span><b id="iRating"></b></div><div><span>Enemy aim</span><b id="iAcc"></b></div><div><span>Reaction</span><b id="iReact"></b></div>
+          <div><span>Enemy HP</span><b id="iEhp"></b></div><div><span>Your HP</span><b id="iPhp"></b></div><div><span>Scripted events</span><b id="iEvents" style="font-size:14px;white-space:normal"></b></div>
+        </div>
+        <div class="why">Director's note: <span id="pWhy"></span></div>
+        <div class="eyebrow" id="pSource" style="margin-top:10px"></div>
+        <div class="row"><button class="btn" id="deployBtn" type="button">Deploy</button><button class="btn ghost" id="regenBtn" type="button">Direct another</button><button class="btn ghost" id="menuBtn1" type="button">Main menu</button></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="screen" id="debrief" hidden>
+    <div class="panel">
+      <div class="eyebrow" id="dEyebrow"></div>
+      <h2 id="dTitle"></h2>
+      <p id="dText"></p>
+      <div class="intel">
+        <div><span>Kills</span><b id="dKills"></b></div><div><span>Accuracy</span><b id="dAcc"></b></div><div><span>Time</span><b id="dTime"></b></div>
+        <div><span>Health left</span><b id="dHp"></b></div><div><span>Level score</span><b id="dScore"></b></div><div><span>Campaign</span><b id="dTotal"></b></div>
+      </div>
+      <div class="row"><button class="btn" id="nextBtn" type="button">Next</button><button class="btn ghost" id="menuBtn2" type="button">Main menu</button></div>
+    </div>
+  </section>
+
+  <section class="screen" id="paused" hidden>
+    <div class="panel" style="max-width:460px">
+      <div class="eyebrow">Paused</div><h2>Hold position</h2>
+      <div class="row" style="margin-top:12px"><button class="small" id="muteBtn" type="button">Sound: on</button><button class="small" id="voiceBtn" type="button">Radio voices: on</button></div>
+      <div class="row"><button class="btn" id="resumeBtn" type="button">Resume</button><button class="btn ghost" id="abortBtn" type="button">Abort mission</button></div>
+    </div>
+  </section>
+</div>
+<script type="module" src="./game.js"></script>
+<script>setTimeout(function(){ if (!window.__kh) { var s = document.getElementById("dirStatus"), d = document.getElementById("dirDot"); if (s) s.textContent = "The 3D engine could not load. Check your connection and reload the page."; if (d) d.className = "dot"; var b = document.getElementById("startBtn"); if (b) b.disabled = true; } }, 15000);</script>
+
+</body>
+</html>

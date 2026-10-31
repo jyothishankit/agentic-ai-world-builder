@@ -1,0 +1,7 @@
+node_modules
+.env
+.env.local
+.vercel
+
+# local download, not part of the project
+killhouse-3d.zip
