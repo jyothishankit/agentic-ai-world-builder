@@ -14,6 +14,85 @@ A cinematic, first-person 3D shooter in the browser (three.js / WebGL). Every le
 
 Rendering: physically based materials, an atmospheric sky (or a starfield at night), image-based lighting, soft shadows, exponential fog, ACES tone mapping and bloom. Particle weather (rain, snow, sand, ash, spores), lightning, aurora shaders and animated lava/water, plus a procedural score and positional sound effects.
 
+## Agentic workflow
+
+A campaign is a loop of three stages. Claude makes two kinds of decisions: the **World Director** designs each level, and the **Battle Commander** steers the fight every ~20 seconds. Each NPC's own brain runs every frame in the browser, and the commander's orders bias what it chooses. Every agent output passes through a validator (`normalizeWorld`, `normalizeOrders`) before it can affect the game, and each agent has an offline fallback.
+
+```mermaid
+flowchart TB
+    START(["Player picks NPC count, levels, mode"]) --> CTX
+
+    subgraph PRE["1 · Before each level"]
+        direction TB
+        CTX["Campaign context<br/>level, history, last-mission stats, seed"] --> DIR{{"World Director agent<br/>Claude"}}
+        DIR -->|world spec JSON| NW["normalizeWorld()<br/>validate + clamp every field"]
+        DIR -. unavailable .-> OFF1["Offline director<br/>procedural spec"] --> NW
+        NW --> WB["World builder<br/>terrain, sky, light, weather,<br/>structures, colliders, nav grid"]
+        WB --> POS["Film-poster briefing + spawn<br/>cast, creature, events"]
+    end
+
+    POS --> PER
+
+    subgraph MATCH["2 · During the match"]
+        direction TB
+        subgraph BRAIN["Each NPC brain · every frame"]
+            direction LR
+            PER["Perceive<br/>sight, hearing"] --> MEM["Remember<br/>last-known enemies,<br/>team callouts"] --> DEC["Decide<br/>utility AI"] --> ACT["Act<br/>A* path, cover,<br/>aim, fire"]
+        end
+        ACT --> WS["World state<br/>health, kills, creature,<br/>scripted events"]
+        WS --> PER
+        WS -->|snapshot every ~20 s| CMD{{"Battle Commander agent<br/>Claude"}}
+        CMD -->|orders + radio lines| NO["normalizeOrders()"]
+        CMD -. unavailable .-> OFF2["Offline commander<br/>role heuristics"] --> NO
+        NO -->|order biases decisions| DEC
+    end
+
+    WS --> END{"Level over?"}
+    subgraph POST["3 · After the level"]
+        direction TB
+        END -->|won or lost| STATS["Debrief stats<br/>kills, accuracy, time, health left"]
+        STATS --> NEXT(["Next level: stats + history<br/>become the director's new context"])
+    end
+```
+
+### Where the Claude calls go
+
+Inside claude.ai the game calls Claude on the viewer's own account. On a Vercel deploy it calls your `/api` functions, which call the Anthropic API with your key. With neither available, the offline agents take over.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant B as Browser game
+    participant C as Claude in claude.ai
+    participant S as Your server /api
+    participant A as Anthropic API
+    Note over B: At load: Claude in claude.ai, else your server, else offline agents
+    alt opened as a claude.ai artifact
+        B->>C: directorPrompt(ctx)
+        C-->>B: world spec JSON
+    else deployed on Vercel
+        B->>S: POST /api/director {ctx}
+        S->>S: sanitize, rate limit
+        S->>A: Messages API, DIRECTOR_MODEL
+        A-->>S: world spec JSON
+        S-->>B: {level}
+    end
+    B->>B: normalizeWorld, build 3D world, play
+    loop every ~20 s of play
+        alt claude.ai artifact
+            B->>C: commanderPrompt(snapshot)
+            C-->>B: orders JSON
+        else Vercel deploy
+            B->>S: POST /api/commander {snapshot}
+            S->>A: Messages API, COMMANDER_MODEL
+            A-->>S: orders JSON
+            S-->>B: {orders, narration}
+        end
+        B->>B: normalizeOrders, bias NPC brains, radio lines
+    end
+    B->>B: level ends, stats feed the next director call
+```
+
 ## Architecture
 
 ```

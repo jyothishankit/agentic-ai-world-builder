@@ -5,3 +5,7 @@ node_modules
 
 # local download, not part of the project
 killhouse-3d.zip
+
+# secrets
+claude_api_key
+*.key
