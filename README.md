@@ -5,6 +5,14 @@ https://www.youtube.com/watch?v=Y6d16KHuGxA
 
 https://www.youtube.com/watch?v=X0oEfGyjB8Y
 
+Screenshots:
+
+<img width="1226" height="729" alt="Screenshot 2026-10-31 at 2 02 06 PM" src="https://github.com/user-attachments/assets/fb06a592-a38e-41d3-81c0-a8521e8643d7" />
+<img width="1205" height="723" alt="Screenshot 2026-10-31 at 2 01 54 PM" src="https://github.com/user-attachments/assets/d9bebf8f-3995-4467-bad2-4d49819057ce" />
+
+
+
+
 A cinematic, first-person 3D shooter in the browser (three.js / WebGL). Every level is staged like a different film, and three layers of AI run it:
 
 | Agent | Runs | What it decides |
