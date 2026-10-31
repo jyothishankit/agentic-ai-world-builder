@@ -9,3 +9,4 @@ killhouse-3d.zip
 # secrets
 claude_api_key
 *.key
+.DS_Store

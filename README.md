@@ -7,8 +7,22 @@ A cinematic, first-person 3D shooter in the browser (three.js / WebGL). Every le
 | Agent | Runs | What it decides |
 |---|---|---|
 | **World Director** | once per level (`/api/director`) | Film title, tagline, logline and genre; one of 8 world archetypes; sun position, sky tint, fog, weather and time of day; colour palette; landmark and points of interest; the creature (titan ape, raptor pack, sky beasts); 1–3 scripted mid-level events; a named cast of NPCs with role, traits, bio and radio quirk; soundtrack mood; difficulty, adapted to how you played the last level |
-| **Battle Commander** | every ~20 s during play (`/api/commander`) | Reads a battlefield snapshot (positions, health, ammo, morale, who sees whom, the creature) and gives each NPC an order (engage, flank, cover, hunt, retreat, regroup, ambush, evade, hold) plus a radio line in that operator's voice |
-| **NPC brains** | every frame, in the browser | Each operator perceives (field of view, line of sight, hearing gunfire), keeps a memory of enemy positions, shares callouts with teammates, scores actions with utility AI biased by the commander's order, finds cover, plans A* paths around obstacles, peeks, reloads, heals and loses morale when allies fall |
+| **Strategy subagents** | one per squad, every ~16–24 s during play (`/api/subagent`) | Operators on the same side who share an attack strategy form a squad, and each squad has its own Claude subagent playing that doctrine. It sees only what its own squad has perceived (last-known enemy positions, allies, the creature) and returns, per operator, an action, a target, an exact `moveTo` position (flank point, ambush spot, sniper perch) and a radio line in that operator's voice |
+| **NPC brains** | every frame, in the browser | Each operator perceives (field of view, line of sight, hearing gunfire), keeps a memory of enemy positions, shares callouts with teammates, scores actions with utility AI shaped by its squad's doctrine and biased by the subagent's latest order, finds cover, plans A* paths around obstacles, peeks, reloads, heals and loses morale when allies fall |
+
+### Attack strategies
+
+The director assigns every operator a strategy. Each one is both a Claude subagent prompt and a set of local brain modifiers, so squads fight differently even when Claude is offline.
+
+| Strategy | Doctrine | How the NPC brain changes |
+|---|---|---|
+| **Shock Assault** (`blitz`) | Close fast and overwhelm with continuous fire | 6 m engage range, 1.3× speed, long bursts, ignores cover until nearly dead |
+| **Pincer** (`pincer`) | Hit one target from two sides at once | Squad members flank on opposite sides (by squad index), then converge |
+| **Overwatch** (`overwatch`) | Long sightlines from cover, slow precise shots | 42 m range, fires only when stationary, tight spread, relocates after every hit |
+| **Ambush** (`ambush`) | Hide on the enemy's route and hold fire | Crouched and silent; won't fire beyond 22 m until sprung, then unloads |
+| **Hit and Run** (`guerrilla`) | Strike for 2–3 s, then break line of sight | Engagement timer forces relocation and holds fire while repositioning |
+| **Suppress and Advance** (`suppress`) | One pins the target while the rest advance | Rotating suppressor with sustained, wide fire; the others flank forward |
+| **Beast Baiters** (`beastlure`) | Use the creature as a weapon | Tags the titan from range, then runs so its path crosses enemy positions |
 
 ### The eight worlds
 
@@ -18,7 +32,7 @@ Rendering: physically based materials, an atmospheric sky (or a starfield at nig
 
 ## Agentic workflow
 
-A campaign is a loop of three stages. Claude makes two kinds of decisions: the **World Director** designs each level, and the **Battle Commander** steers the fight every ~20 seconds. Each NPC's own brain runs every frame in the browser, and the commander's orders bias what it chooses. Every agent output passes through a validator (`normalizeWorld`, `normalizeOrders`) before it can affect the game, and each agent has an offline fallback.
+A campaign is a loop of three stages. Claude makes two kinds of decisions: the **World Director** designs each level and assigns every operator an attack strategy, and a **strategy subagent per squad** plans that squad's attack every ~16–24 seconds, using only what its own members have seen. Each NPC's brain runs every frame in the browser, shaped by its doctrine and biased by its subagent's orders. Every agent output passes through a validator (`normalizeWorld`, `normalizeSubOrders`) before it can affect the game, and each agent has an offline fallback.
 
 ```mermaid
 flowchart TB
@@ -43,10 +57,11 @@ flowchart TB
         end
         ACT --> WS["World state<br/>health, kills, creature,<br/>scripted events"]
         WS --> PER
-        WS -->|snapshot every ~20 s| CMD{{"Battle Commander agent<br/>Claude"}}
-        CMD -->|orders + radio lines| NO["normalizeOrders()"]
-        CMD -. unavailable .-> OFF2["Offline commander<br/>role heuristics"] --> NO
+        WS -->|"each squad's own view<br/>every ~16-24 s"| SUB{{"Strategy subagents · Claude<br/>one per squad: blitz, pincer, overwatch,<br/>ambush, hit and run, suppress, beast bait"}}
+        SUB -->|"orders, moveTo positions,<br/>radio lines"| NO["normalizeSubOrders()"]
+        SUB -. unavailable .-> OFF2["Offline doctrine<br/>same strategy as geometry"] --> NO
         NO -->|order biases decisions| DEC
+        DOC["Doctrine modifiers<br/>range, speed, fire discipline,<br/>bursts, cover, relocation"] --> DEC
     end
 
     WS --> END{"Level over?"}
@@ -80,17 +95,17 @@ sequenceDiagram
         S-->>B: {level}
     end
     B->>B: normalizeWorld, build 3D world, play
-    loop every ~20 s of play
+    loop each squad, staggered, every ~16-24 s of play
         alt claude.ai artifact
-            B->>C: commanderPrompt(snapshot)
-            C-->>B: orders JSON
+            B->>C: subagentPrompt(squad view, doctrine)
+            C-->>B: intent + orders JSON
         else Vercel deploy
-            B->>S: POST /api/commander {snapshot}
-            S->>A: Messages API, COMMANDER_MODEL
-            A-->>S: orders JSON
-            S-->>B: {orders, narration}
+            B->>S: POST /api/subagent {squad view}
+            S->>A: Messages API, SUBAGENT_MODEL
+            A-->>S: intent + orders JSON
+            S-->>B: {intent, orders}
         end
-        B->>B: normalizeOrders, bias NPC brains, radio lines
+        B->>B: normalizeSubOrders, move squad to positions, radio lines
     end
     B->>B: level ends, stats feed the next director call
 ```
@@ -102,14 +117,14 @@ public/
   index.html   UI shell: menu, film-poster briefing, intro, HUD
   game.js      renderer, player, NPC brains, creatures, combat, audio, agent clients
   world.js     turns a world spec into a lit 3D level + colliders + nav grid
-  agents.js    prompts + validators for both agents, offline fallbacks (shared with the server)
+  agents.js    director + strategy subagent prompts, validators, offline fallbacks (shared with the server)
 api/
   director.js  POST {ctx}  -> {level}
-  commander.js POST {snap} -> {orders, narration}
+  subagent.js  POST {snap} -> {intent, orders}   (one squad, one doctrine)
   _lib.js      sanitizing, rate limiting, Anthropic call, tolerant JSON parse
 ```
 
-The browser picks an agent backend at runtime: **Claude inside claude.ai** (when opened as a claude.ai artifact) → **your server** (`GET /api/director` returns `{ok:true}`) → **offline agents** (procedural director + heuristic commander), so the game never breaks. Every value an agent returns is validated and clamped (`normalizeWorld`, `normalizeOrders`) before it touches the game.
+The browser picks an agent backend at runtime: **Claude inside claude.ai** (when opened as a claude.ai artifact) → **your server** (`GET /api/director` returns `{ok:true}`) → **offline agents** (procedural director + geometric doctrine for each squad), so the game never breaks. Every value an agent returns is validated and clamped (`normalizeWorld`, `normalizeOrders`) before it touches the game.
 
 No build step. three.js loads from jsDelivr through an import map.
 
@@ -127,7 +142,7 @@ No build step. three.js loads from jsDelivr through an import map.
 4. **Set environment variables** (Project → Settings → Environment Variables), then redeploy:
    - `ANTHROPIC_API_KEY` (required)
    - `DIRECTOR_MODEL` (optional, default `claude-sonnet-5-5`; richer worlds)
-   - `COMMANDER_MODEL` (optional, default `claude-haiku-5-5`; fast tactical turns)
+   - `SUBAGENT_MODEL` (optional, default `claude-haiku-5-5`; fast squad tactics)
 5. **Verify.** `https://<project>.vercel.app/api/director` should return `{"ok":true,...}`, and the game menu should say *"Agents online: Claude via the game server"*.
 6. **Custom domain** (optional): Project → Settings → Domains.
 
@@ -135,7 +150,7 @@ Local development: `cp .env.example .env.local`, add your key, run `npx vercel d
 
 ### Costs and limits
 
-One director call per level (~3–4k output tokens) and one commander call every ~20 s of play (~1k tokens). The built-in limiter allows 6 levels and 10 commander turns per minute per IP, per instance. For real traffic, swap it for Upstash Redis (`@upstash/ratelimit`) or Vercel Firewall rules.
+One director call per level (~3–4k output tokens) plus one subagent call per squad every ~16–24 s of play (~1k tokens each; with 4 squads that is roughly 10–15 calls a minute). Subagent calls are spaced at least 3.5 s apart and back off for 45 s when rate-limited, falling back to the offline doctrine. The built-in limiter allows 6 levels and 30 subagent turns per minute per IP, per instance. For real traffic, swap it for Upstash Redis (`@upstash/ratelimit`) or Vercel Firewall rules.
 
 ## Next steps
 

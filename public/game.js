@@ -139,15 +139,15 @@ async function askWorld(ctx, log) {
   log('Offline director: composing a level…'); await new Promise(r => setTimeout(r, 400));
   return Object.assign(AG.proceduralWorld(ctx), { source: 'Composed by the offline director' });
 }
-let cmdBusy = false;
-async function askCommander(snap) {
+let aiGap = 0; // seconds until the next Claude subagent call may start (keeps calls spread out)
+async function askSubagent(snap) {
   if (aiMode === 'claude' && sampleFn) {
-    try { const raw = await sampleFn.json(AG.commanderPrompt(snap), { modelTier: 'quick', cache: false }); return { ...AG.normalizeOrders(raw, snap), src: 'ai' }; }
-    catch (e) { if (HARD_OFF.includes(e && e.code)) { aiMode = 'offline'; renderAIStatus(); } }
+    try { const raw = await sampleFn.json(AG.subagentPrompt(snap), { modelTier: 'quick', cache: false }); return { ...AG.normalizeSubOrders(raw, snap), src: 'claude' }; }
+    catch (e) { const c = e && e.code; if (HARD_OFF.includes(c)) { aiMode = 'offline'; renderAIStatus(); } else if (c === 'rate_limited') aiGap = 45; }
   } else if (aiMode === 'server') {
-    try { const r = await fetch('api/commander', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ snap }) }); if (r.ok) { const j = await r.json(); return { ...AG.normalizeOrders(j, snap), src: 'ai' }; } } catch (e) {}
+    try { const r = await fetch('api/subagent', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ snap }) }); if (r.ok) return { ...AG.normalizeSubOrders(await r.json(), snap), src: 'claude' }; if (r.status === 429) aiGap = 45; } catch (e) {}
   }
-  return { ...AG.offlineCommander(snap), src: 'offline' };
+  return { ...AG.offlineSubagent(snap), src: 'offline' };
 }
 
 /* =============================== models =============================== */
@@ -264,9 +264,12 @@ function viewModel() {
   return { root: g, flash };
 }
 function flashTex() { const c = document.createElement('canvas'); c.width = c.height = 64; const x = c.getContext('2d'); const gr = x.createRadialGradient(32, 32, 0, 32, 32, 32); gr.addColorStop(0, 'rgba(255,255,230,1)'); gr.addColorStop(0.3, 'rgba(255,200,90,.8)'); gr.addColorStop(1, 'rgba(255,120,0,0)'); x.fillStyle = gr; x.fillRect(0, 0, 64, 64); for (let i = 0; i < 6; i++) { x.save(); x.translate(32, 32); x.rotate(i * Math.PI / 3); x.fillStyle = 'rgba(255,230,150,.6)'; x.fillRect(0, -1.5, 32, 3); x.restore(); } const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t; }
-function tagSprite(text, color) {
-  const c = document.createElement('canvas'); c.width = 256; c.height = 64; const x = c.getContext('2d'); x.font = '600 30px "IBM Plex Mono", monospace'; x.textAlign = 'center'; x.fillStyle = 'rgba(0,0,0,.45)'; const w = x.measureText(text).width + 20; x.fillRect(128 - w / 2, 10, w, 42); x.fillStyle = color; x.fillText(text, 128, 42);
-  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, depthTest: false, transparent: true })); s.scale.set(1.6, 0.4, 1); s.renderOrder = 20; return s;
+function tagSprite(text, color, sub, subColor) {
+  const c = document.createElement('canvas'); c.width = 320; c.height = 96; const x = c.getContext('2d'); x.textAlign = 'center';
+  x.font = '600 30px "IBM Plex Mono", monospace'; const w = Math.max(x.measureText(text).width, sub ? 150 : 0) + 24; x.fillStyle = 'rgba(0,0,0,.5)'; x.fillRect(160 - w / 2, 6, w, sub ? 84 : 46);
+  x.fillStyle = color; x.fillText(text, 160, 40);
+  if (sub) { x.font = '600 20px "IBM Plex Mono", monospace'; x.fillStyle = subColor || '#fff'; x.fillText(sub, 160, 74); }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, depthTest: false, transparent: true })); s.scale.set(1.9, 0.57, 1); s.renderOrder = 20; return s;
 }
 
 /* =============================== game state =============================== */
@@ -364,11 +367,11 @@ function randomFreePoint(nearX = 0, nearZ = 0, radius = 1e9, minFrom = null, min
 let uid = 0;
 function makeSoldier(o) {
   const e = Object.assign({ kind: 'soldier', id: o.id || 'e' + (uid++), alive: true, pos: V(), vel: V(), yaw: 0, pitch: 0, hp: 100, maxHp: 100, mag: 30, magSize: 30, reload: 0, fireCd: 0,
-    kills: 0, crouch: false, lastShotT: -99, lastHurtT: -99, hurtFrom: null, onGround: true, vy: 0, walkPh: Math.random() * 6 }, o);
+    kills: 0, crouch: false, lastShotT: -99, lastHurtT: -99, hurtFrom: null, onGround: true, vy: 0, moving: 0, walkPh: Math.random() * 6 }, o);
   if (!e.isPlayer) {
     const tc = e.team === 'A' ? spec.factions.ally.color : (campaign.mode === 'ffa' ? new THREE.Color().setHSL((e.idx * 0.137) % 1, 0.85, 0.55).getStyle() : spec.factions.hostile.color);
     e.color = tc; e.model = soldierModel(tc, e.team === 'A' ? '#4a5a44' : (campaign.mode === 'ffa' ? ['#4a4a42', '#3d4652', '#5a4a3a', '#3a3a3a'][e.idx % 4] : '#3b3f45'));
-    scene.add(e.model.root); e.tag = tagSprite(e.name.toUpperCase(), e.team === 'A' ? '#7cc8ff' : '#ff8a7a'); e.tag.position.y = 2.15; e.model.root.add(e.tag);
+    scene.add(e.model.root); const ST = AG.STRATEGIES[e.persona.strategy] || AG.STRATEGIES.guerrilla; e.strat = ST; e.tag = tagSprite(e.name.toUpperCase(), e.team === 'A' ? '#7cc8ff' : '#ff8a7a', ST.short, ST.color); e.tag.position.y = 2.25; e.model.root.add(e.tag);
     e.brain = { memory: new Map(), morale: 1, order: null, action: 'patrol', target: null, goal: null, path: null, pathI: 0, repath: 0, decideT: Math.random() * 0.5, perceiveT: Math.random() * 0.2,
       reactT: 0, burst: 0, burstPause: 0, strafe: 1, strafeT: 0, peekT: 0, barkT: 3 + Math.random() * 5, vis: null, coverAt: null, stuckT: 0, lastP: V() };
     e.voice = { pitch: 0.75 + Math.random() * 0.5 };
@@ -469,6 +472,7 @@ function damage(v, amount, src, point, part) {
   v.hp -= amount; v.lastHurtT = G.t; v.hurtFrom = src;
   const blood = v.kind === 'soldier' ? '#a01810' : v.kind === 'titan' ? '#6a1a10' : '#7a2010';
   if (point) burst(point, blood, v.kind === 'titan' ? 10 : 6, 2.5, 0.5);
+  if (src && src.brain && src.strat && src.strat.relocateOnHit) { src.brain.relocateUntil = G.t + src.strat.relocateOnHit; src.brain.coverAt = null; }
   if (src && src.isPlayer) { G.stats.hits++; G.hitT = 0.12; sfx('hit', 1); if (part === 'head') G.headT = 0.2; }
   if (v.isPlayer) { G.stats.dmgTaken += amount; G.hurtT = 0.4; G.shake = Math.max(G.shake, 0.25); if (src) { G.dmgDir = Math.atan2(src.pos.x - v.pos.x, src.pos.z - v.pos.z); G.dmgDirT = 1.2; } sfx('hurt', 0.8); }
   if (v.brain && src && src !== v) { v.brain.memory.set(src.id, { x: src.pos.x, z: src.pos.z, t: G.t, ent: src }); v.brain.morale = Math.max(0, v.brain.morale - amount / 300); }
@@ -495,7 +499,7 @@ function checkWin() { if (G.ended) return; const left = G.entities.filter(e => e
 const ROLE_RANGE = { sniper: 38, assault: 18, support: 22, flanker: 13, berserker: 5 };
 function enemiesOf(e) { return G.entities.filter(o => o.alive && o !== e && (o.kind === 'soldier' ? hostile(e, o) : o.kind !== 'flyer')); }
 function updateNPC(e, dt) {
-  const b = e.brain, P = e.persona, now = G.t, sightR = (world.night ? 45 : 85) * (G.blackout > 0 ? 0.5 : 1) * (spec.weather === 'fog' || spec.weather === 'sandstorm' ? 0.6 : 1);
+  const b = e.brain, P = e.persona, S = e.strat, now = G.t, sightR = (world.night ? 45 : 85) * (G.blackout > 0 ? 0.5 : 1) * (spec.weather === 'fog' || spec.weather === 'sandstorm' ? 0.6 : 1);
   const eye = V(e.pos.x, e.pos.y + (e.crouch ? 1.05 : 1.55), e.pos.z);
   // --- perceive ---
   b.perceiveT -= dt;
@@ -529,7 +533,7 @@ function updateNPC(e, dt) {
     const mates = G.entities.filter(o => o.kind === 'soldier' && o.alive && o !== e && o.team === e.team);
     const mateD = mates.length ? Math.min(...mates.map(m => m.pos.distanceTo(e.pos))) : 0;
     const role = P.role, aggr = e.aggr, caut = P.caution;
-    const U = { patrol: 0.15, engage: 0, cover: 0, flank: 0, hunt: 0, retreat: 0, regroup: 0, evade: 0, ambush: 0, hold: 0.1 };
+    const U = { patrol: 0.15, engage: 0, cover: 0, flank: 0, hunt: 0, retreat: 0, regroup: 0, evade: 0, ambush: 0, hold: 0.1, lure: 0 };
     if (V_ && V_.kind !== 'titan') { const d = V_.pos.distanceTo(e.pos); U.engage = 0.55 + aggr * 0.4 + hpF * 0.15 + (role === 'berserker' ? 0.35 : 0) - (role === 'sniper' && d < 15 ? 0.3 : 0);
       U.cover = caut * 0.45 + (1 - hpF) * 0.5 + (now - e.lastHurtT < 2 ? 0.35 : 0) + (e.reload > 0 ? 0.4 : 0) + (role === 'sniper' ? 0.25 : 0) - (role === 'berserker' ? 0.4 : 0);
       U.flank = role === 'flanker' ? 0.75 : 0.25 * aggr; }
@@ -538,6 +542,15 @@ function updateNPC(e, dt) {
     if (mates.length && mateD > 22) U.regroup = P.teamwork * 0.55 + (e.ally ? 0.25 : 0);
     if (e.ally && G.player.alive && G.player.pos.distanceTo(e.pos) > 28) U.regroup += 0.35;
     if (titanNear) U.evade = 1.3 - aggr * 0.3;
+    // --- doctrine of this NPC's strategy subagent ---
+    if (V_ && V_.kind !== 'titan') { U.engage += S.engage; U.cover += S.cover; U.flank += S.flank; }
+    if (known && !V_) { U.hunt += S.hunt; U.ambush += S.ambush; U.flank += S.flank * 0.6; }
+    if (S.engageWindow) { if (b.action === 'engage' && V_) { b.engageStart = b.engageStart || now; if (now - b.engageStart > S.engageWindow) { b.relocateUntil = now + S.relocate; b.engageStart = 0; b.coverAt = null; } } else b.engageStart = 0; }
+    if (b.relocateUntil > now) { U.cover += 0.9; U.engage -= 0.7; }
+    if (S.suppressor && V_) { const sq = G.squadOf[e.id]; const alive = sq ? sq.members.filter(m => m.alive) : [e]; b.isSuppressor = alive[Math.floor(now / 10) % alive.length] === e;
+      if (b.isSuppressor) { U.engage += 0.45; U.flank -= 0.3; } else { U.flank += 0.45; U.engage -= 0.25; } }
+    if (S.lure && creatureAlive()) U.lure = S.lure + (titanNear ? -0.6 : 0) + (known ? 0.1 : 0);
+    if (S.short === 'BLITZ' && hpF < 0.25) U.cover += 0.6;
     if (b.order && b.order.until > now && U[b.order.action] !== undefined) U[b.order.action] += 0.5;
     let best = 'patrol', bv = -1; for (const k in U) if (U[k] > bv) { bv = U[k]; best = k; }
     if (best !== b.action) { b.action = best; b.goal = null; b.path = null; b.coverAt = null; if (Math.random() < 0.18) bark(e, best); }
@@ -547,9 +560,15 @@ function updateNPC(e, dt) {
     const T = V_ || (ordTarget && ordTarget.alive ? ordTarget : null) || (known ? known.ent : null);
     const tp = T ? (b.memory.get(T.id) || { x: T.pos.x, z: T.pos.z }) : null;
     let goal = null;
-    if (best === 'engage' && T) { const d = Math.hypot(tp.x - e.pos.x, tp.z - e.pos.z); const want = ROLE_RANGE[role] || 18; if (d > want + 4 || !V_) goal = { x: tp.x, z: tp.z }; }
+    const ord = b.order && b.order.until > now ? b.order : null;
+    const ordMove = ord && ord.moveTo && ord.action === best && !(best === 'engage' && V_) && Math.hypot(ord.moveTo.x - e.pos.x, ord.moveTo.z - e.pos.z) > 2.5 ? ord.moveTo : null;
+    if (ordMove) goal = { x: ordMove.x, z: ordMove.z };
+    else if (best === 'lure') { const c = G.titan && G.titan.alive ? G.titan : G.entities.find(o => o.kind === 'raptor' && o.alive); const foe = T && T.kind === 'soldier' ? T : null;
+      if (c && foe) { const kx = foe.pos.x - c.pos.x, kz = foe.pos.z - c.pos.z, kl = Math.hypot(kx, kz) || 1; goal = { x: foe.pos.x + kx / kl * 14, z: foe.pos.z + kz / kl * 14 }; } else if (c) { const kx = e.pos.x - c.pos.x, kz = e.pos.z - c.pos.z, kl = Math.hypot(kx, kz) || 1; goal = { x: e.pos.x + kx / kl * 15, z: e.pos.z + kz / kl * 15 }; } }
+    else if (best === 'hold') goal = null;
+    else if (best === 'engage' && T) { const d = Math.hypot(tp.x - e.pos.x, tp.z - e.pos.z); const want = S.range * 0.65 + (ROLE_RANGE[role] || 18) * 0.35; if (d > want + 4 || !V_) goal = { x: tp.x, z: tp.z }; }
     else if (best === 'cover' && T) { if (!b.coverAt || b.coverFor !== T) { b.coverAt = findCover(e, T.pos); b.coverFor = T; } goal = b.coverAt; }
-    else if (best === 'flank' && tp) { const ang = Math.atan2(e.pos.x - tp.x, e.pos.z - tp.z) + (b.flankSide || (b.flankSide = Math.random() < 0.5 ? 1 : -1)) * 1.4; goal = { x: tp.x + Math.sin(ang) * 14, z: tp.z + Math.cos(ang) * 14 }; }
+    else if (best === 'flank' && tp) { const ang = Math.atan2(e.pos.x - tp.x, e.pos.z - tp.z) + (b.flankSide || (b.flankSide = squadSide(e))) * 1.4; goal = { x: tp.x + Math.sin(ang) * 14, z: tp.z + Math.cos(ang) * 14 }; }
     else if (best === 'hunt' && tp) goal = { x: tp.x, z: tp.z };
     else if (best === 'retreat') { const thr = T ? T.pos : e.pos; const away = V(e.pos.x - thr.x, 0, e.pos.z - thr.z).normalize(); const kit = G.pickups.filter(k => k.alive).sort((a, c) => a.pos.distanceTo(e.pos) - c.pos.distanceTo(e.pos))[0];
       goal = kit && kit.pos.distanceTo(e.pos) < 40 ? { x: kit.pos.x, z: kit.pos.z } : { x: e.pos.x + away.x * 22, z: e.pos.z + away.z * 22 }; }
@@ -562,15 +581,16 @@ function updateNPC(e, dt) {
   }
   b.repath -= dt;
   // --- act: move ---
-  let mx = 0, mz = 0, speed = 4.2 * (e.ally ? 1 : 0.85 + spec.difficulty.aggression * 0.3);
+  let mx = 0, mz = 0, speed = 4.2 * (e.ally ? 1 : 0.85 + spec.difficulty.aggression * 0.3) * S.speed;
   if (b.path && b.pathI < b.path.length) {
     const wp = b.path[b.pathI]; const dx = wp.x - e.pos.x, dz = wp.z - e.pos.z, d = Math.hypot(dx, dz);
     if (d < 1.2) b.pathI++; else { mx = dx / d; mz = dz / d; }
   }
-  const atCover = b.action === 'cover' || b.action === 'ambush' ? (b.coverAt && Math.hypot(b.coverAt.x - e.pos.x, b.coverAt.z - e.pos.z) < 1.8) : false;
+  const coverSpot = b.coverAt || (b.order && b.order.until > now && b.order.moveTo);
+  const atCover = (b.action === 'cover' || b.action === 'ambush') && coverSpot ? Math.hypot(coverSpot.x - e.pos.x, coverSpot.z - e.pos.z) < 2.2 : false;
   e.crouch = atCover && b.peekT <= 0;
   if (V_ && (b.action === 'engage') && !b.path) { b.strafeT -= dt; if (b.strafeT <= 0) { b.strafe = Math.random() < 0.5 ? -1 : 1; b.strafeT = 0.6 + Math.random() * 1.5; }
-    const to = V(V_.pos.x - e.pos.x, 0, V_.pos.z - e.pos.z).normalize(); const d = V_.pos.distanceTo(e.pos), want = ROLE_RANGE[P.role] || 18; const fwd = d > want + 3 ? 0.7 : d < want - 4 ? -0.6 : 0;
+    const to = V(V_.pos.x - e.pos.x, 0, V_.pos.z - e.pos.z).normalize(); const d = V_.pos.distanceTo(e.pos), want = S.range * 0.65 + (ROLE_RANGE[P.role] || 18) * 0.35; const fwd = d > want + 3 ? 0.7 : d < want - 4 ? -0.6 : 0;
     mx = to.x * fwd + to.z * b.strafe * 0.8; mz = to.z * fwd - to.x * b.strafe * 0.8; speed *= 0.7; }
   if (atCover) { b.peekT -= dt; if (b.peekT < -2.2 - P.caution * 2) b.peekT = 1 + Math.random(); if (e.mag < e.magSize * 0.5 && e.reload <= 0 && b.peekT <= 0) startReload(e); }
   if (b.action === 'retreat' && b.pathI >= (b.path ? b.path.length : 0)) { e.hp = Math.min(e.maxHp, e.hp + dt * 4); b.morale = Math.min(1, b.morale + dt * 0.03); }
@@ -584,21 +604,31 @@ function updateNPC(e, dt) {
   e.pos.y = Math.max(world.heightAt(e.pos.x, e.pos.z), world.waterLevel !== null && world.terrainType === 'flatwater' ? -0.2 : -1e3);
   e.moving = Math.hypot(mx, mz) * sp;
   // --- act: aim & shoot ---
+  let FT = V_; // lure: tag the creature from a distance so it follows you into the enemy
+  if (b.action === 'lure' && G.titan && G.titan.alive && G.titan.target !== e && G.titan.pos.distanceTo(e.pos) > 22 && G.titan.pos.distanceTo(e.pos) < 70 && (!V_ || V_.pos.distanceTo(e.pos) > 18)) FT = G.titan;
   let wantYaw = e.yaw;
-  if (V_) wantYaw = Math.atan2(V_.pos.x - e.pos.x, V_.pos.z - e.pos.z); else if (mx || mz) wantYaw = Math.atan2(mx, mz);
+  if (FT) wantYaw = Math.atan2(FT.pos.x - e.pos.x, FT.pos.z - e.pos.z); else if (mx || mz) wantYaw = Math.atan2(mx, mz);
   e.yaw += clamp(angDiff(e.yaw, wantYaw), -6 * dt, 6 * dt);
   b.reactT -= dt; if (b.burstPause > 0) b.burstPause -= dt;
-  const canFire = V_ && e.reload <= 0 && e.fireCd <= 0 && b.reactT <= 0 && b.burstPause <= 0 && !(atCover && b.peekT <= 0 && b.action === 'cover') && Math.abs(angDiff(e.yaw, wantYaw)) < 0.3;
+  let discipline = true;
+  if (V_ && S.holdFireBeyond && V_.pos.distanceTo(e.pos) > S.holdFireBeyond && now - e.lastHurtT > 2 && !(b.sprungUntil > now)) discipline = false;
+  if (V_ && S.holdFireBeyond && discipline) b.sprungUntil = Math.max(b.sprungUntil || 0, now + 6);
+  if (S.stillFire && e.moving > 0.8) discipline = false;
+  if (b.relocateUntil > now && V_ && V_.pos.distanceTo(e.pos) > 8) discipline = false;
+  const canFire = FT && discipline && e.reload <= 0 && e.fireCd <= 0 && b.reactT <= 0 && b.burstPause <= 0 && !(atCover && b.peekT <= 0 && b.action === 'cover') && Math.abs(angDiff(e.yaw, wantYaw)) < 0.3;
   if (canFire) {
-    const tgt = V(V_.pos.x, V_.pos.y + (V_.kind === 'titan' ? 4.5 * V_.size : V_.crouch ? 1.0 : 1.25), V_.pos.z);
-    const dir = tgt.sub(eye).normalize(); const d = V_.pos.distanceTo(e.pos);
-    const spread = (1 - e.acc) * 0.06 + (e.moving > 1 ? 0.02 : 0) + (P.role === 'sniper' ? -0.01 : 0) + d * 0.0003 + (V_.isPlayer && V_.crouch ? 0.006 : 0);
-    shoot(e, dir, Math.max(0.004, spread)); e.fireCd = P.role === 'sniper' ? 0.85 : P.role === 'support' ? 0.09 : 0.13;
-    if (++b.burst >= (P.role === 'support' ? 8 : 3 + Math.floor(Math.random() * 4))) { b.burst = 0; b.burstPause = 0.35 + Math.random() * 0.7 * (1.2 - e.aggr); }
+    const tgt = V(FT.pos.x, FT.pos.y + (FT.kind === 'titan' ? 4.5 * FT.size : FT.crouch ? 1.0 : 1.25), FT.pos.z);
+    const dir = tgt.sub(eye).normalize(); const d = FT.pos.distanceTo(e.pos);
+    const sMul = S.suppressor && !b.isSuppressor ? 1 : S.spread;
+    const spread = ((1 - e.acc) * 0.06 + (e.moving > 1 ? 0.02 : 0) + (P.role === 'sniper' ? -0.01 : 0) + d * 0.0003 + (FT.isPlayer && FT.crouch ? 0.006 : 0)) * sMul;
+    shoot(e, dir, Math.max(0.003, spread)); e.fireCd = P.role === 'sniper' ? Math.max(S.fireCd, 0.6) : S.fireCd;
+    const [b0, b1] = S.burst; if (++b.burst >= b0 + Math.floor(Math.random() * (b1 - b0 + 1))) { b.burst = 0; b.burstPause = 0.35 + Math.random() * 0.7 * (1.2 - e.aggr); }
   } else if (!V_ && e.mag < e.magSize * 0.4 && e.reload <= 0) startReload(e);
   // --- barks ---
   b.barkT -= dt;
 }
+function creatureAlive() { return (G.titan && G.titan.alive) || G.entities.some(o => o.kind === 'raptor' && o.alive); }
+function squadSide(e) { const sq = G.squadOf[e.id]; if (!sq) return Math.random() < 0.5 ? 1 : -1; return sq.members.indexOf(e) % 2 ? 1 : -1; }
 function targetEnt(id) { if (!id) return null; if (id === 'player') return G.player; if (id === 'creature') return G.titan || G.entities.find(e => e.kind === 'raptor' && e.alive); return G.entities.find(e => e.id === id); }
 function findCover(e, threat) {
   let best = null, bs = 1e9; const tEye = V(threat.x, (threat.y || 0) + 1.5, threat.z);
@@ -618,6 +648,7 @@ function animateSoldier(e, dt) {
   const m = e.model; if (!m) return;
   m.root.position.copy(e.pos); m.root.rotation.y = e.yaw;
   if (!e.alive) { e.deadT += dt; m.root.rotation.x = Math.max(-Math.PI / 2, -e.deadT * 5); m.root.position.y = e.pos.y + 0.15 * Math.min(1, e.deadT * 3); if (e.deadT > 20) m.root.visible = false; return; }
+  if (!Number.isFinite(e.moving)) e.moving = 0; if (!Number.isFinite(e.walkPh)) e.walkPh = 0;
   const mv = clamp(e.moving / 4, 0, 1.4); e.walkPh += dt * (4 + e.moving * 2.2);
   const s = Math.sin(e.walkPh) * 0.65 * mv;
   m.legs[0].leg.rotation.x = s; m.legs[1].leg.rotation.x = -s; m.legs[0].knee.rotation.x = Math.max(0, -s) * 1.2 + (e.crouch ? 1.4 : 0); m.legs[1].knee.rotation.x = Math.max(0, s) * 1.2 + (e.crouch ? 1.4 : 0);
@@ -769,36 +800,88 @@ function runEvents() {
     if (ev.type === 'titan_arrives') { if (!G.titan) spawnTitan(true); banner(`${(spec.creature.name || 'THE TITAN').toUpperCase()}`, ev.text || 'Something enormous is coming. Do not draw its attention.', 3500); }
     else if (ev.type === 'blackout') { world.setBlackout(25); G.blackout = 25; banner('BLACKOUT', ev.text || 'Power is down. Sightlines are short.', 2600); }
     else if (ev.type === 'reinforcements') { const n = 2; for (let k = 0; k < n; k++) { const i = spec.operators.length + G.reinf++; const name = ['Grave', 'Spectre', 'Bastion', 'Fang'][G.reinf % 4] + '-' + i; const p = randomFreePoint(0, 0, 1e9, [G.player.pos], 50) || { x: 0, z: 0 };
-      const op = { name, role: k ? 'flanker' : 'assault', aggression: 0.7, caution: 0.3, teamwork: 0.6, bio: '', quirk: 'all business' }; const e = makeSoldier({ id: 'n' + i, idx: i, name, team: campaign.mode === 'ffa' ? 'n' + i : 'H', persona: op, hp: spec.difficulty.enemyHealth, maxHp: spec.difficulty.enemyHealth, acc: spec.difficulty.enemyAccuracy, react: spec.difficulty.enemyReactionMs / 1000, aggr: 0.7 });
-      e.pos.set(p.x, world.heightAt(p.x, p.z), p.z); e.brain.memory.set('player', { x: G.player.pos.x, z: G.player.pos.z, t: G.t, ent: G.player }); G.entities.push(e); } banner('REINFORCEMENTS', ev.text || 'Hostile reinforcements inbound.', 2600); }
+      const op = { name, role: k ? 'flanker' : 'assault', strategy: k ? 'pincer' : 'blitz', aggression: 0.7, caution: 0.3, teamwork: 0.6, bio: '', quirk: 'all business' }; const e = makeSoldier({ id: 'n' + i, idx: i, name, team: campaign.mode === 'ffa' ? 'n' + i : 'H', persona: op, hp: spec.difficulty.enemyHealth, maxHp: spec.difficulty.enemyHealth, acc: spec.difficulty.enemyAccuracy, react: spec.difficulty.enemyReactionMs / 1000, aggr: 0.7 });
+      e.pos.set(p.x, world.heightAt(p.x, p.z), p.z); e.brain.memory.set('player', { x: G.player.pos.x, z: G.player.pos.z, t: G.t, ent: G.player }); G.entities.push(e); } buildSquads(); banner('REINFORCEMENTS', ev.text || 'Hostile reinforcements inbound.', 2600); }
     else if (ev.type === 'storm_surge') { world.flash(1.5); sfx('thunder', 1); banner('STORM SURGE', ev.text || 'The weather turns on everyone.', 2400); G.stormSurge = 30; }
     else if (ev.type === 'quake') { G.shake = 1.2; G.quakeT = 3; sfx('slam', 1); sfx('thunder', 0.7); banner('TREMOR', ev.text || 'The ground is moving.', 2400); }
     else if (ev.type === 'supply_drop') { const p = randomFreePoint(G.player.pos.x, G.player.pos.z, 35) || { x: 0, z: 0 }; addPickup(p.x, p.z, 70, true); banner('SUPPLY DROP', ev.text || 'Med supplies dropped nearby. Follow the flare.', 2600); }
   }
 }
-function snapshot() {
-  const npcs = G.entities.filter(e => e.kind === 'soldier' && !e.isPlayer && e.alive).map(e => ({ id: e.id, name: e.name, role: e.persona.role, team: campaign.mode === 'tdm' ? e.team : 'solo', x: Math.round(e.pos.x), z: Math.round(e.pos.z), hp: Math.round(100 * e.hp / e.maxHp), ammo: Math.round(100 * e.mag / e.magSize), morale: Math.round(100 * e.brain.morale), sees: [...e.brain.memory.entries()].filter(([, m]) => m.seen && G.t - m.t < 3).map(([k]) => k === 'creature' ? 'creature' : k).slice(0, 4), quirk: e.persona.quirk }));
-  const c = G.titan && G.titan.alive ? G.titan : null;
-  return { t: G.t, mode: campaign.mode, world: { title: spec.title, archetype: spec.archetype, weather: spec.weather, timeOfDay: spec.timeOfDay },
-    player: { name: campaign.callsign, x: Math.round(G.player.pos.x), z: Math.round(G.player.pos.z), hp: Math.round(100 * G.player.hp / G.player.maxHp) },
-    npcs, creature: c ? { type: 'titan_ape', name: c.name, x: Math.round(c.pos.x), z: Math.round(c.pos.z), hp: Math.round(100 * c.hp / c.maxHp) } : null, recent: G.recent.slice(-5) };
+/* ---------- strategy subagents: one per squad (same team + same strategy) ---------- */
+function buildSquads() {
+  const by = new Map();
+  for (const e of G.entities) {
+    if (e.kind !== 'soldier' || e.isPlayer) continue;
+    const key = (campaign.mode === 'tdm' ? e.team : 'ffa') + '|' + e.persona.strategy;
+    if (!by.has(key)) by.set(key, { key, strategy: e.persona.strategy, team: campaign.mode === 'tdm' ? e.team : 'solo', members: [], t: 0, busy: false, intent: '', src: '', calls: 0 });
+    by.get(key).members.push(e);
+  }
+  G.squads = [...by.values()]; G.squadOf = {};
+  G.squads.forEach((sq, i) => { sq.t = 5 + i * 3.5; sq.members.forEach(m => G.squadOf[m.id] = sq); });
+  renderSquads();
 }
-async function commanderTick() {
-  if (cmdBusy || !G || G.ended) return; cmdBusy = true;
-  const snap = snapshot(); if (!snap.npcs.length) { cmdBusy = false; return; }
-  const res = await askCommander(snap); cmdBusy = false;
+function squadSnapshot(sq) {
+  const alive = sq.members.filter(m => m.alive);
+  const contacts = new Map();
+  for (const m of alive) for (const [id, mem] of m.brain.memory) {
+    const ent = mem.ent; if (!ent.alive || ent.kind === 'flyer') continue;
+    const age = Math.round(G.t - mem.t); const prev = contacts.get(id); if (prev && prev.ageS <= age) continue;
+    contacts.set(id, { id: ent.kind === 'titan' ? 'creature' : id, kind: ent.isPlayer ? 'player' : ent.kind === 'soldier' ? 'operator' : 'creature', name: ent.isPlayer ? campaign.callsign : ent.kind === 'soldier' ? ent.name : ent.kind, x: Math.round(mem.x), z: Math.round(mem.z), ageS: age });
+  }
+  const allies = campaign.mode === 'tdm' ? G.entities.filter(o => o.kind === 'soldier' && o.alive && o.team === sq.team && !sq.members.includes(o)).slice(0, 8).map(o => ({ id: o.id, name: o.isPlayer ? campaign.callsign : o.name, x: Math.round(o.pos.x), z: Math.round(o.pos.z) })) : [];
+  const c = G.titan && G.titan.alive && alive.some(m => m.pos.distanceTo(G.titan.pos) < 120) ? G.titan : null;
+  return { t: G.t, mode: campaign.mode, B: Math.round(world.B), strategy: sq.strategy, team: sq.team,
+    world: { title: spec.title, archetype: spec.archetype, weather: spec.weather, timeOfDay: spec.timeOfDay },
+    squad: alive.map(e => ({ id: e.id, name: e.name, role: e.persona.role, x: Math.round(e.pos.x), z: Math.round(e.pos.z), hp: Math.round(100 * e.hp / e.maxHp), ammo: Math.round(100 * e.mag / e.magSize), morale: Math.round(100 * e.brain.morale), action: e.brain.action, quirk: e.persona.quirk })),
+    contacts: [...contacts.values()].filter(c2 => c2.kind !== 'creature' || c2.id === 'creature').slice(0, 10), allies,
+    creature: c ? { type: 'titan_ape', name: c.name, x: Math.round(c.pos.x), z: Math.round(c.pos.z), hp: Math.round(100 * c.hp / c.maxHp) } : null,
+    recent: G.recent.slice(-4) };
+}
+async function subagentTick(sq) {
+  sq.busy = true; sq.calls++;
+  const snap = squadSnapshot(sq);
+  const live = aiMode === 'claude' || aiMode === 'server';
+  const res = snap.squad.length ? (live && aiGap <= 0 ? await askSubagent(snap) : { ...AG.offlineSubagent(snap), src: 'offline' }) : { orders: [], intent: '' };
+  sq.busy = false;
   if (!G || G.ended) return;
-  $('#cmdSrc').textContent = res.src === 'ai' ? 'COMMANDER · CLAUDE' : 'COMMANDER · OFFLINE';
+  sq.src = res.src; if (res.intent) sq.intent = res.intent;
   let delay = 0;
-  for (const o of res.orders) { const e = G.entities.find(x => x.id === o.id); if (!e || !e.alive) continue; e.brain.order = { action: o.action, target: o.target, until: G.t + 22 }; e.brain.decideT = 0;
-    if (o.say) { setTimeout(() => { if (e.alive && G && !G.ended) comms(e, o.say, true); }, delay); delay += 1400; } }
-  if (res.narration) setTimeout(() => subtitle(res.narration), delay + 200);
+  for (const o of res.orders) { const e = G.entities.find(x => x.id === o.id); if (!e || !e.alive) continue;
+    e.brain.order = { action: o.action, target: o.target, moveTo: o.moveTo, until: G.t + 24 }; e.brain.decideT = 0; e.brain.goal = null; e.brain.coverAt = null;
+    if (o.say) { setTimeout(() => { if (e.alive && G && !G.ended) comms(e, o.say, res.src === 'claude'); }, delay); delay += 1300; } }
+  renderSquads();
+}
+function updateSubagents(dt) {
+  aiGap -= dt;
+  const live = aiMode === 'claude' || aiMode === 'server';
+  for (const sq of G.squads) {
+    if (sq.busy || !sq.members.some(m => m.alive)) continue;
+    sq.t -= dt; if (sq.t > 0) continue;
+    if (live && aiGap > 0) continue; // spread Claude calls out; offline ones run freely
+    // squads in contact think more often
+    const inContact = sq.members.some(m => m.alive && m.brain.vis);
+    sq.t = live ? (inContact ? 16 : 24) + G.squads.length * 1.5 : (inContact ? 8 : 12);
+    if (live) aiGap = 3.5;
+    subagentTick(sq);
+  }
+}
+function renderSquads() {
+  const box = $('#squads'); if (!box || !G || !G.squads) return; box.textContent = '';
+  for (const sq of G.squads) {
+    const ST = AG.STRATEGIES[sq.strategy]; const alive = sq.members.filter(m => m.alive).length;
+    const row = document.createElement('div'); row.className = 'sq' + (alive ? '' : ' dead');
+    const tag = document.createElement('b'); tag.textContent = ST.short; tag.style.color = ST.color;
+    const meta = document.createElement('span'); meta.className = 'm'; meta.textContent = `${alive}/${sq.members.length} ${sq.team === 'A' ? 'ALLY' : sq.team === 'H' ? 'HOSTILE' : ''}${sq.src ? ' · ' + (sq.src === 'claude' ? 'Claude' : 'offline') : ''}`;
+    const it = document.createElement('i'); it.textContent = alive ? (sq.intent || 'Planning…') : 'Squad wiped out';
+    row.append(tag, meta, it); box.append(row);
+  }
 }
 
 /* =============================== HUD =============================== */
 function comms(e, text, speakIt = false) {
   if (!text) return; const el = document.createElement('div'); const n = document.createElement('b'); n.textContent = e.name.toUpperCase(); n.style.color = e.team === 'A' ? '#7cc8ff' : '#ff8a7a';
-  el.append(n, document.createTextNode(' ' + text)); const box = $('#comms'); box.append(el); while (box.children.length > 5) box.firstChild.remove(); setTimeout(() => el.classList.add('old'), 7000);
+  const st = document.createElement('small'); if (e.strat) { st.textContent = ' ' + e.strat.short; st.style.color = e.strat.color; }
+  el.append(n, st, document.createTextNode(' ' + text)); const box = $('#comms'); box.append(el); while (box.children.length > 5) box.firstChild.remove(); setTimeout(() => el.classList.add('old'), 7000);
   G.recent.push(`${e.name}: "${text}"`);
   if (speakIt || Math.random() < 0.4) if (e.pos.distanceTo(G.player.pos) < 60 || e.team === 'A') speak(text, e.voice);
 }
@@ -869,6 +952,7 @@ function prepareLevel(s) {
   if (ct === 'titan_ape' && !spec.events.some(e => e.type === 'titan_arrives')) { spawnTitan(false); }
   if (ct === 'raptor_pack') spawnRaptors(3 + Math.min(4, campaign.level));
   if (ct === 'sky_beasts' || spec.archetype === 'primeval_island' || spec.archetype === 'desert_colossi') spawnFlyers(ct === 'sky_beasts' ? 6 : 3);
+  buildSquads();
   G.vm = viewModel(); camera.add(G.vm.root); G.vm.root.visible = false;
   for (const e of G.entities) if (e.kind === 'soldier' && !e.isPlayer) animateSoldier(e, 0);
 }
@@ -883,7 +967,7 @@ function beginPlay() {
   $('#hCreature').textContent = spec.creature.type !== 'none' ? `${spec.creature.type === 'titan_ape' ? 'Titan' : spec.creature.type === 'raptor_pack' ? 'Predators' : 'Flyers'}: ${spec.creature.name || 'unknown'}` : '';
   $('#comms').innerHTML = ''; $('#killfeed').innerHTML = '';
   lockPointer();
-  if (aiMode === 'claude' || aiMode === 'server') banner('', 'Battle Commander is reading the field…', 2200);
+  banner('', `${G.squads.length} squad subagents are planning their attack…`, 2400);
 }
 function endLevel(won, msg) {
   if (G.ended) return; G.ended = true; G.won = won; G.endT = 2.4; G.deathMsg = G.deathMsg || msg;
@@ -948,7 +1032,8 @@ function loop(now) {
   }
   for (const k of G.pickups) if (k.alive) { k.mesh.rotation.y += dt; k.mesh.position.y = k.pos.y + 0.35 + Math.sin(G.t * 3) * 0.08; }
   runEvents();
-  G.cmdT -= dt; if (G.cmdT <= 0 && !G.ended) { G.cmdT = aiMode === 'offline' ? 12 : 20; commanderTick(); }
+  if (!G.ended) updateSubagents(dt);
+  G.squadT = (G.squadT || 0) - dt; if (G.squadT <= 0) { G.squadT = 1; renderSquads(); }
   updateFX(dt); updateHUD(dt);
   if (G.ended) { G.endT -= dt; if (G.endT <= 0) finishLevel(); }
   const _t1 = performance.now(); render(); G.prof = { update: Math.round(_t1 - _t0), render: Math.round(performance.now() - _t1) };
@@ -1001,7 +1086,7 @@ function renderPoster(s) {
   $('#pGenre').textContent = `${s.genre} · ${AG.ARCHETYPES[s.archetype].label} · ${s.timeOfDay} · ${s.weather}`;
   $('#pTitle').textContent = s.title; $('#pTag').textContent = s.tagline; $('#pLog').textContent = s.logline;
   const cast = $('#pCast'); cast.innerHTML = ''; const allies = campaign.mode === 'tdm' ? Math.floor(campaign.npcs / 2) : 0;
-  s.operators.forEach((o, i) => { const li = document.createElement('li'); const n = document.createElement('b'); n.textContent = o.name; n.className = i < allies ? 'ally' : 'foe'; const r = document.createElement('span'); r.textContent = ` ${o.role} · ${o.bio}`; li.title = o.quirk; li.append(n, r); cast.append(li); });
+  s.operators.forEach((o, i) => { const li = document.createElement('li'); const n = document.createElement('b'); n.textContent = o.name; n.className = i < allies ? 'ally' : 'foe'; const ST = AG.STRATEGIES[o.strategy]; const sg = document.createElement('em'); sg.textContent = ' ' + (ST ? ST.label : ''); if (ST) sg.style.color = ST.color; const r = document.createElement('span'); r.textContent = ` ${o.role} · ${o.bio}`; li.title = o.quirk; li.append(n, sg, r); cast.append(li); });
   $('#pCreature').textContent = s.creature.type !== 'none' ? `and introducing ${s.creature.name || 'the beast'} as the ${s.creature.type === 'titan_ape' ? 'titan' : s.creature.type === 'raptor_pack' ? 'pack' : 'flock'}` : '';
   $('#pFactions').textContent = campaign.mode === 'tdm' ? `${s.factions.ally.name} vs ${s.factions.hostile.name}` : `${s.factions.hostile.name} contract · free-for-all`;
   const D = s.difficulty; $('#iRating').textContent = D.rating + '/10'; $('#iAcc').textContent = Math.round(D.enemyAccuracy * 100) + '%'; $('#iReact').textContent = Math.round(D.enemyReactionMs) + 'ms'; $('#iEhp').textContent = D.enemyHealth; $('#iPhp').textContent = D.playerHealth;

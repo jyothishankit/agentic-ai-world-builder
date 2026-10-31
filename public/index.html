@@ -107,6 +107,14 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
 #killfeed{display:flex;flex-direction:column;gap:3px;align-items:flex-end;font-family:var(--mono);font-size:12px}
 #killfeed div{background:rgba(0,0,0,.55);padding:3px 9px;border-right:2px solid var(--accent)}
 .commsbox{width:min(380px,46vw)}
+#squadsWrap{margin-top:10px;max-width:min(420px,46vw)}
+.sqhead{font-family:var(--mono);font-size:10px;letter-spacing:.16em;color:var(--accent);margin-bottom:4px;text-shadow:0 1px 2px #000}
+#squads{display:flex;flex-direction:column;gap:3px}
+.sq{display:grid;grid-template-columns:auto auto minmax(0,1fr);gap:2px 8px;align-items:baseline;background:linear-gradient(90deg,rgba(0,0,0,.55),rgba(0,0,0,.1));padding:3px 8px;font-family:var(--mono);font-size:11px}
+.sq b{font-weight:600;letter-spacing:.06em}.sq .m{color:#aab3a0;font-size:10px}.sq i{font-style:normal;color:#e6ebdd;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.sq.dead{opacity:.35}
+#comms small{font-size:9.5px;letter-spacing:.06em}
+.billing li em{font-family:var(--mono);font-style:normal;font-weight:500;font-size:10.5px;letter-spacing:.04em;text-transform:none}
 #cmdSrc{font-family:var(--mono);font-size:10px;letter-spacing:.16em;color:var(--accent);margin-bottom:4px;text-shadow:0 1px 2px #000}
 #comms{display:flex;flex-direction:column;gap:3px;font-family:var(--mono);font-size:12px;line-height:1.35}
 #comms div{background:linear-gradient(90deg,rgba(0,0,0,.6),rgba(0,0,0,.15));padding:4px 8px;border-left:2px solid rgba(255,255,255,.3);transition:opacity 1s}
@@ -144,7 +152,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
 body.touch .touchbtns{display:flex;position:absolute;right:max(16px,env(safe-area-inset-right,0px));bottom:calc(110px + env(safe-area-inset-bottom,0px));flex-direction:column;gap:10px;pointer-events:auto;z-index:6}
 .touchbtns button{width:64px;height:64px;border-radius:50%;border:1px solid rgba(255,255,255,.35);background:rgba(0,0,0,.35);color:#fff;font:700 11px var(--mono)}
 .touchbtns #tFire{width:82px;height:82px;background:rgba(233,164,59,.35)}
-@media (max-width:620px){#radar{width:110px;height:110px}.ammo{font-size:40px}.commsbox{display:none}.htitle{font-size:20px}}
+@media (max-width:620px){#squadsWrap{display:none}#radar{width:110px;height:110px}.ammo{font-size:40px}.commsbox{display:none}.htitle{font-size:20px}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 
@@ -161,12 +169,13 @@ body.touch .touchbtns{display:flex;position:absolute;right:max(16px,env(safe-are
       <div class="sub" id="hSub"></div>
       <div class="obj" id="hObj"></div>
       <div class="sub" id="hCreature" style="margin-top:4px"></div>
+      <div id="squadsWrap"><div class="sqhead">SQUAD SUBAGENTS</div><div id="squads"></div></div>
     </div>
     <div class="tr"><div id="hostiles"></div><div id="killfeed"></div></div>
     <div class="bl">
       <canvas id="radar" width="150" height="150"></canvas>
       <div>
-        <div class="commsbox"><div id="cmdSrc">COMMANDER</div><div id="comms"></div></div>
+        <div class="commsbox"><div id="cmdSrc">RADIO</div><div id="comms"></div></div>
         <div class="sub" style="margin-top:10px">HEALTH</div>
         <div class="hp"><i id="hHp" style="width:100%"></i></div>
       </div>
@@ -183,7 +192,7 @@ body.touch .touchbtns{display:flex;position:absolute;right:max(16px,env(safe-are
     <div class="panel">
       <div class="eyebrow">AI-directed cinematic shooter</div>
       <h1>KILL<span>HOUSE</span></h1>
-      <p>Every level is a new film. A director agent writes the world, the weather, the monster and the cast. A commander agent runs the battle in real time, and every NPC thinks for itself.</p>
+      <p>Every level is a new film. A director agent writes the world, the weather, the monster and the cast. Each enemy squad gets its own subagent with a different attack strategy, and every NPC thinks for itself.</p>
       <div class="row" style="margin-top:12px"><span class="chip"><i class="dot warn" id="dirDot"></i><span id="dirStatus">Connecting to the agents…</span></span></div>
       <div class="grid">
         <label class="f">Callsign<input id="callsign" type="text" maxlength="14" value="REAPER"></label>
@@ -196,7 +205,7 @@ body.touch .touchbtns{display:flex;position:absolute;right:max(16px,env(safe-are
       <div class="row"><button class="btn" id="startBtn" type="button">Direct level 1</button></div>
       <div class="features">
         <div><b>World Director</b>Eight cinematic worlds, from a jungle island ruled by a titan ape to a prison pit that drops hundreds of floors. Sky, weather, cast and events change every time.</div>
-        <div><b>Battle Commander</b>Reads the battlefield every few seconds and orders each NPC to flank, ambush, retreat or lure the monster, with radio lines in each operator's voice.</div>
+        <div><b>Strategy subagents</b>Every squad has its own Claude subagent with a different doctrine: shock assault, pincer, overwatch, ambush, hit and run, suppress and advance, or luring the monster onto the enemy.</div>
         <div><b>Agentic NPCs</b>Each operator sees, hears, remembers and reasons on its own: finds cover, paths around obstacles, calls out targets and loses nerve when friends fall.</div>
       </div>
       <div class="keys">

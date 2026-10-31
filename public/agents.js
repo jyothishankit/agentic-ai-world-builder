@@ -34,7 +34,34 @@ export const CREATURES = ['none', 'titan_ape', 'raptor_pack', 'sky_beasts'];
 export const EVENTS = ['titan_arrives', 'blackout', 'reinforcements', 'storm_surge', 'quake', 'supply_drop'];
 export const ROLES = ['assault', 'sniper', 'support', 'flanker', 'berserker'];
 export const MOODS = ['dread', 'epic', 'pulse', 'melancholy', 'tension'];
-export const ACTIONS = ['engage', 'flank', 'cover', 'hunt', 'retreat', 'regroup', 'ambush', 'evade', 'hold'];
+export const ACTIONS = ['engage', 'flank', 'cover', 'hunt', 'retreat', 'regroup', 'ambush', 'evade', 'hold', 'lure'];
+
+// Attack strategies. Each squad of operators sharing a team and a strategy is run by its own subagent,
+// and the same doctrine also tunes each NPC's local brain (range, speed, fire discipline, cover use).
+export const STRATEGIES = {
+  blitz: { label: 'Shock Assault', short: 'BLITZ', color: '#ff6b3d',
+    doctrine: 'Close the distance fast and overwhelm the target with continuous fire. Rush across open ground, push right into the enemy, and only take cover when nearly dead.',
+    range: 6, speed: 1.3, engage: 0.45, cover: -0.5, flank: 0, hunt: 0.35, ambush: -0.3, fireCd: 0.1, burst: [7, 12], spread: 1.25 },
+  pincer: { label: 'Pincer', short: 'PINCER', color: '#ffc23d',
+    doctrine: 'Split up and hit one target from two sides at once. Members circle wide on opposite flanks, then open fire together so the target cannot face both.',
+    range: 14, speed: 1.1, engage: 0, cover: 0, flank: 0.55, hunt: 0.15, ambush: 0, fireCd: 0.12, burst: [4, 7], spread: 1 },
+  overwatch: { label: 'Overwatch', short: 'OVERWATCH', color: '#7fd3ff',
+    doctrine: 'Hold long sightlines from cover or high ground, fire slow precise shots, and relocate to a new perch after every hit or when spotted.',
+    range: 42, speed: 0.9, engage: -0.1, cover: 0.45, flank: -0.3, hunt: -0.2, ambush: 0.2, fireCd: 0.75, burst: [1, 2], spread: 0.45, stillFire: true, relocateOnHit: 5 },
+  ambush: { label: 'Ambush', short: 'AMBUSH', color: '#b98bff',
+    doctrine: 'Hide on the route the enemy will take, stay crouched and silent, hold fire until the target is close, then unload everything at once.',
+    range: 10, speed: 1, engage: -0.15, cover: 0.2, flank: -0.1, hunt: -0.3, ambush: 0.65, fireCd: 0.11, burst: [8, 14], spread: 1, holdFireBeyond: 22 },
+  guerrilla: { label: 'Hit and Run', short: 'HIT&RUN', color: '#6bff9a',
+    doctrine: 'Strike in short bursts of two to three seconds, then break line of sight and reposition before the enemy can answer. Never fight from the same spot twice.',
+    range: 18, speed: 1.2, engage: 0.15, cover: 0.15, flank: 0.2, hunt: 0.1, ambush: 0, fireCd: 0.11, burst: [4, 7], spread: 1, engageWindow: 2.8, relocate: 4 },
+  suppress: { label: 'Suppress and Advance', short: 'SUPPRESS', color: '#ff7ab8',
+    doctrine: 'One member pins the target with sustained fire while the others advance under that cover, then they swap and leapfrog forward.',
+    range: 24, speed: 1, engage: 0.1, cover: 0.1, flank: 0.15, hunt: 0.15, ambush: -0.2, fireCd: 0.075, burst: [12, 20], spread: 1.5, suppressor: true },
+  beastlure: { label: 'Beast Baiters', short: 'BAIT', color: '#ffa24a',
+    doctrine: 'Use the creature as a weapon. Draw it with gunfire, then run so its path goes through enemy positions, and stay out of its reach.',
+    range: 20, speed: 1.15, engage: 0, cover: 0, flank: 0, hunt: 0.1, ambush: 0, fireCd: 0.12, burst: [3, 6], spread: 1, lure: 0.55 },
+};
+const ROLE_STRATEGY = { sniper: 'overwatch', flanker: 'pincer', berserker: 'blitz', support: 'suppress', assault: 'guerrilla' };
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const num = (v, d) => (v !== null && v !== '' && v !== undefined && Number.isFinite(+v)) ? +v : d;
@@ -66,10 +93,10 @@ Scripted events (1-3, at 20-150 seconds): titan_arrives, blackout, reinforcement
 
 Difficulty: rise steadily with level number; ease off if the player failed or ended with low health; push harder if they dominated.
 
-Cast: write exactly ${ctx.npcs} operators${ctx.mode === 'tdm' ? ` (the first ${allies} are the player's allies, the rest hostile)` : ''}. Give each a memorable callsign, a role (assault|sniper|support|flanker|berserker), traits 0-1, a one-line bio and a quirk that shows in how they talk on the radio. All names and factions are original fiction.
+Cast: write exactly ${ctx.npcs} operators${ctx.mode === 'tdm' ? ` (the first ${allies} are the player's allies, the rest hostile)` : ''}. Give each a memorable callsign, a role (assault|sniper|support|flanker|berserker), an attack strategy (blitz|pincer|overwatch|ambush|guerrilla|suppress|beastlure; beastlure only if there is a titan_ape or raptor_pack), traits 0-1, a one-line bio and a quirk that shows in how they talk on the radio. Operators on the same side who share a strategy fight as one squad under their own tactical subagent, so use at least three different strategies and give most squads two or more members. All names and factions are original fiction.
 
 Reply with only this JSON object (real values, no comments):
-{"title":"FILM-STYLE TITLE","tagline":"poster tagline","logline":"2 sentences that set up the level like a movie","genre":"e.g. monster epic","archetype":"one of the archetypes","timeOfDay":"dawn|day|golden|dusk|night","weather":"clear|rain|storm|snow|sandstorm|fog|ash|spores","sky":{"sunElevation":25,"sunAzimuth":140,"turbidity":6,"tint":"#rrggbb"},"fog":{"color":"#rrggbb","density":0.4},"palette":{"primary":"#rrggbb","secondary":"#rrggbb","accent":"#rrggbb","emissive":"#rrggbb"},"landmark":"name of the set-piece landmark","pois":[{"x":0.3,"z":-0.5,"type":"bunker|tower|ruin|wreck|statue|crates"}],"creature":{"type":"titan_ape","name":"what locals call it","size":1.0,"temper":0.6},"events":[{"at":60,"type":"reinforcements","text":"short alert line"}],"factions":{"hostile":{"name":"","color":"#rrggbb"},"ally":{"name":"","color":"#rrggbb"}},"operators":[{"name":"","role":"assault","aggression":0.6,"caution":0.4,"teamwork":0.5,"bio":"","quirk":""}],"music":{"mood":"dread|epic|pulse|melancholy|tension"},"density":{"vegetation":0.6,"structures":0.5,"cover":0.6},"difficulty":{"rating":3,"enemyAccuracy":0.45,"enemyReactionMs":600,"enemyHealth":100,"playerHealth":130,"aggression":0.5},"reasoning":"one sentence on the difficulty choice"}
+{"title":"FILM-STYLE TITLE","tagline":"poster tagline","logline":"2 sentences that set up the level like a movie","genre":"e.g. monster epic","archetype":"one of the archetypes","timeOfDay":"dawn|day|golden|dusk|night","weather":"clear|rain|storm|snow|sandstorm|fog|ash|spores","sky":{"sunElevation":25,"sunAzimuth":140,"turbidity":6,"tint":"#rrggbb"},"fog":{"color":"#rrggbb","density":0.4},"palette":{"primary":"#rrggbb","secondary":"#rrggbb","accent":"#rrggbb","emissive":"#rrggbb"},"landmark":"name of the set-piece landmark","pois":[{"x":0.3,"z":-0.5,"type":"bunker|tower|ruin|wreck|statue|crates"}],"creature":{"type":"titan_ape","name":"what locals call it","size":1.0,"temper":0.6},"events":[{"at":60,"type":"reinforcements","text":"short alert line"}],"factions":{"hostile":{"name":"","color":"#rrggbb"},"ally":{"name":"","color":"#rrggbb"}},"operators":[{"name":"","role":"assault","strategy":"pincer","aggression":0.6,"caution":0.4,"teamwork":0.5,"bio":"","quirk":""}],"music":{"mood":"dread|epic|pulse|melancholy|tension"},"density":{"vegetation":0.6,"structures":0.5,"cover":0.6},"difficulty":{"rating":3,"enemyAccuracy":0.45,"enemyReactionMs":600,"enemyHealth":100,"playerHealth":130,"aggression":0.5},"reasoning":"one sentence on the difficulty choice"}
 Ranges: sunElevation -15..80 (negative is night), sunAzimuth 0..360, turbidity 1..20, fog density 0..1, poi x/z -0.85..0.85 (4-7 pois), creature size 0.7..1.5, temper 0..1, rating 1..10, enemyAccuracy 0.2..0.9, enemyReactionMs 180..900, enemyHealth 70..200, playerHealth 90..170.`;
 }
 
@@ -103,9 +130,15 @@ export function proceduralWorld(ctx) {
   const names = NAMES.slice().sort(() => rng() - 0.5);
   const operators = Array.from({ length: ctx.npcs }, (_, i) => {
     const role = pick(ROLES);
-    return { name: names[i % names.length] + (i >= names.length ? '-' + i : ''), role, aggression: +(0.3 + rng() * 0.6).toFixed(2), caution: +(0.2 + rng() * 0.6).toFixed(2), teamwork: +(0.2 + rng() * 0.7).toFixed(2),
+    return { name: names[i % names.length] + (i >= names.length ? '-' + i : ''), role, strategy: ROLE_STRATEGY[role], aggression: +(0.3 + rng() * 0.6).toFixed(2), caution: +(0.2 + rng() * 0.6).toFixed(2), teamwork: +(0.2 + rng() * 0.7).toFixed(2),
       bio: `${role[0].toUpperCase() + role.slice(1)} with ${2 + Math.floor(rng() * 14)} years in the field.`, quirk: pick(QUIRKS) };
   });
+  // form real squads: each side split into groups of 2-3 that share a strategy
+  const allyN = ctx.mode === 'tdm' ? Math.floor(ctx.npcs / 2) : 0;
+  const doctrines = ['pincer', 'overwatch', 'blitz', 'ambush', 'guerrilla', 'suppress'].sort(() => rng() - 0.5);
+  if (['titan_ape', 'raptor_pack'].includes(creatureType)) doctrines.splice(1, 0, 'beastlure');
+  let di = 0; const assign = (from, to) => { for (let i = from; i < to;) { const size = Math.min(to - i, to - i === 4 ? 2 : 2 + Math.floor(rng() * 2)); const st = doctrines[di++ % doctrines.length]; for (let k = 0; k < size; k++) operators[i++].strategy = st; } };
+  assign(0, allyN); assign(allyN, operators.length);
   const events = [];
   if (creatureType === 'titan_ape' && rng() < 0.6) events.push({ at: Math.round(35 + rng() * 50), type: 'titan_arrives', text: 'Seismic contact. Something huge is coming.' });
   events.push({ at: Math.round(60 + rng() * 60), type: pick(['reinforcements', 'storm_surge', 'quake', 'supply_drop', 'blackout']), text: '' });
@@ -142,9 +175,15 @@ export function normalizeWorld(raw, ctx, isFallback = false) {
   ops = Array.from({ length: ctx.npcs }, (_, i) => {
     const o = ops[i] || {}, f = fbOps[i] || { name: 'Op-' + (i + 1), role: 'assault', aggression: 0.5, caution: 0.5, teamwork: 0.5, bio: '', quirk: '' };
     let name = str(o.name, f.name, 18); if (seen.has(name.toLowerCase())) name = name + '-' + (i + 1); seen.add(name.toLowerCase());
-    return { name, role: oneOf(o.role, ROLES, f.role), aggression: clamp(num(o.aggression, f.aggression), 0, 1), caution: clamp(num(o.caution, f.caution), 0, 1), teamwork: clamp(num(o.teamwork, f.teamwork), 0, 1),
+    return { name, role: oneOf(o.role, ROLES, f.role), strategy: oneOf(o.strategy, Object.keys(STRATEGIES), null), aggression: clamp(num(o.aggression, f.aggression), 0, 1), caution: clamp(num(o.caution, f.caution), 0, 1), teamwork: clamp(num(o.teamwork, f.teamwork), 0, 1),
       bio: str(o.bio, f.bio, 140), quirk: str(o.quirk, f.quirk, 90) };
   });
+  { // fill missing strategies, drop beast-baiting with no beast, and make sure the cast mixes doctrines
+    const pool = ['pincer', 'overwatch', 'blitz', 'ambush', 'guerrilla', 'suppress'];
+    ops.forEach((o, i) => { if (!o.strategy || (o.strategy === 'beastlure' && !['titan_ape', 'raptor_pack'].includes(creatureType))) o.strategy = o.strategy && o.strategy !== 'beastlure' ? o.strategy : ROLE_STRATEGY[o.role] || pool[i % pool.length]; });
+    const distinct = new Set(ops.map(o => o.strategy)).size, want = Math.min(3, Math.ceil(ops.length / 2));
+    if (distinct < want) ops.forEach((o, i) => { o.strategy = pool[(i >> 1) % pool.length]; }); // pairs, varied
+  }
   let events = Array.isArray(raw.events) ? raw.events.slice(0, 4).map(e => ({ at: clamp(num(e && e.at, 60), 15, 240), type: oneOf(e && e.type, EVENTS, null), text: str(e && e.text, '', 90) })).filter(e => e.type) : (fb ? fb.events : []);
   if (creatureType !== 'titan_ape') events = events.filter(e => e.type !== 'titan_arrives');
   const pois = Array.isArray(raw.pois) && raw.pois.length >= 2 ? raw.pois.slice(0, 8).map(p => ({ x: clamp(num(p && p.x, 0), -0.85, 0.85), z: clamp(num(p && p.z, 0), -0.85, 0.85), type: oneOf(p && p.type, ['bunker', 'tower', 'ruin', 'wreck', 'statue', 'crates'], 'crates') })) : (fb ? fb.pois : []);
@@ -233,3 +272,79 @@ export function offlineCommander(snap) {
   return { orders, narration: '' };
 }
 export function bark(action) { const l = BARKS[action] || BARKS.hold; return l[Math.floor(Math.random() * l.length)]; }
+
+
+/* ===================== Strategy subagents ===================== */
+// snap: {t, mode, B, world:{title,archetype,weather,timeOfDay}, strategy, team, creature:{type,name,x,z,hp}|null,
+//        squad:[{id,name,role,x,z,hp,ammo,morale,action,quirk}], contacts:[{id,kind,name,x,z,ageS}], allies:[{id,name,x,z}], recent:[]}
+export function subagentPrompt(snap) {
+  const S = STRATEGIES[snap.strategy] || STRATEGIES.guerrilla;
+  const side = snap.mode === 'tdm' ? (snap.team === 'A' ? "the player's squad (team A)" : 'the hostile team (team H)') : 'a free-for-all; your operators are rivals who each fight alone, but all follow your doctrine';
+  return `You are the "${S.label}" tactical subagent in "Killhouse", a 3D shooter level titled "${snap.world.title}" (${snap.world.archetype.replace('_', ' ')}, ${snap.world.timeOfDay}, ${snap.world.weather}). You fight for ${side}.
+Your doctrine: ${S.doctrine}
+
+Map: x and z run from -${snap.B} to ${snap.B} metres. Time ${Math.round(snap.t)}s.
+YOUR OPERATORS (you command only these):
+${snap.squad.map(m => `${m.id} ${m.name} [${m.role}] at (${m.x},${m.z}) hp ${m.hp}% ammo ${m.ammo}% morale ${m.morale}% doing ${m.action}; voice: ${m.quirk}`).join('\n')}
+${snap.allies.length ? `FRIENDLY UNITS (not yours): ${snap.allies.map(a => `${a.name} (${a.x},${a.z})`).join(', ')}` : ''}
+WHAT YOUR SQUAD KNOWS ABOUT ENEMIES (last seen positions; may be stale):
+${snap.contacts.length ? snap.contacts.map(c => `${c.id} ${c.name} [${c.kind}] at (${c.x},${c.z}), seen ${c.ageS}s ago`).join('\n') : 'No contacts. Search where enemies are likely to be.'}
+${snap.creature ? `CREATURE ${snap.creature.type} "${snap.creature.name}" at (${snap.creature.x},${snap.creature.z}), hp ${snap.creature.hp}%. It attacks whoever is nearest and is drawn to gunfire.` : ''}
+Recent: ${snap.recent.length ? snap.recent.join(' | ') : 'quiet'}
+
+Apply your doctrine to this exact situation. Give every operator one order and place them precisely with moveTo (a flank point, ambush spot, sniper perch, fallback position or rush target).
+Actions: engage, flank, cover, hunt, retreat, regroup, ambush, evade, hold${snap.creature ? ', lure (drag the creature onto enemies)' : ''}.
+Targets: a contact id from the list above, "creature", or null.
+
+Reply with only JSON: {"intent":"one short line describing the squad's plan","orders":[{"id":"${snap.squad[0] ? snap.squad[0].id : 'n0'}","action":"flank","target":"player","moveTo":{"x":0,"z":0},"say":"radio line under 12 words, in that operator's voice"}]}`;
+}
+
+export function normalizeSubOrders(raw, snap) {
+  const mine = new Set(snap.squad.map(m => m.id)), contacts = new Set(snap.contacts.map(c => c.id));
+  const B = snap.B || 84;
+  const orders = [];
+  for (const o of (Array.isArray(raw && raw.orders) ? raw.orders : [])) {
+    if (!o || !mine.has(o.id)) continue;
+    const t = o.target === 'creature' || contacts.has(o.target) ? o.target : null;
+    const mt = o.moveTo && Number.isFinite(+o.moveTo.x) && Number.isFinite(+o.moveTo.z) ? { x: clamp(+o.moveTo.x, -B, B), z: clamp(+o.moveTo.z, -B, B) } : null;
+    let action = oneOf(o.action, ACTIONS, 'hold'); if (action === 'lure' && !snap.creature) action = 'engage';
+    orders.push({ id: o.id, action, target: t, moveTo: mt, say: str(o.say, '', 90) });
+  }
+  return { orders, intent: str(raw && raw.intent, '', 110) };
+}
+
+const SUB_LINES = {
+  blitz: ['Go go go! Straight down their throat!', 'Charging! Keep firing!', 'No cover, no mercy. Move!'],
+  pincer: ['Taking the left side.', 'Swinging right. Wait for my mark.', 'In position. Hit them together!'],
+  overwatch: ['Glass on target. Sending.', 'Relocating to a new perch.', 'I have the long angle. Hold still.'],
+  ambush: ['Nobody fire. Let them walk in.', 'Holding. Not yet...', 'Now! Light them up!'],
+  guerrilla: ['Hit them and fade!', 'Burst and move, burst and move.', 'Breaking contact. New angle.'],
+  suppress: ['Keep their heads down!', 'Suppressing! Move up, move up!', 'Covering fire, go!'],
+  beastlure: ['Wake the big one up!', 'Run it into their lines!', 'Got its attention. Moving!'],
+};
+// Offline subagent: the same doctrines as deterministic geometry, so squads still fight differently without an AI.
+export function offlineSubagent(snap) {
+  const st = snap.strategy, B = snap.B || 84, sq = snap.squad; if (!sq.length) return { orders: [], intent: '' };
+  const cx = sq.reduce((a, m) => a + m.x, 0) / sq.length, cz = sq.reduce((a, m) => a + m.z, 0) / sq.length;
+  const foes = snap.contacts.filter(c => c.kind !== 'creature');
+  const tgt = foes.slice().sort((a, b) => Math.hypot(a.x - cx, a.z - cz) - Math.hypot(b.x - cx, b.z - cz))[0] || null;
+  const P = (x, z) => ({ x: clamp(Math.round(x), -B, B), z: clamp(Math.round(z), -B, B) });
+  const line = () => { const l = SUB_LINES[st] || SUB_LINES.guerrilla; return Math.random() < 0.5 ? l[Math.floor(Math.random() * l.length)] : ''; };
+  if (!tgt) return { intent: 'No contacts. Sweeping toward the centre.', orders: sq.map((m, i) => ({ id: m.id, action: 'hunt', target: null, moveTo: P(m.x * 0.4 + (i - sq.length / 2) * 8, m.z * 0.4), say: i === 0 ? line() : '' })) };
+  const dx = tgt.x - cx, dz = tgt.z - cz, L = Math.hypot(dx, dz) || 1, ux = dx / L, uz = dz / L, px = -uz, pz = ux;
+  const half = Math.floor(snap.t / 8) % 2;
+  const orders = sq.map((m, i) => {
+    let action = 'engage', moveTo = P(tgt.x, tgt.z);
+    if (st === 'pincer') { const side = i % 2 ? 1 : -1; action = 'flank'; moveTo = P(tgt.x + px * 16 * side - ux * 4, tgt.z + pz * 16 * side - uz * 4); }
+    else if (st === 'overwatch') { action = 'cover'; const r = Math.min(40, Math.max(28, L)); moveTo = P(tgt.x - ux * r + px * (i - sq.length / 2) * 10, tgt.z - uz * r + pz * (i - sq.length / 2) * 10); }
+    else if (st === 'ambush') { action = 'ambush'; moveTo = P(cx + ux * L * 0.35 + px * (i % 2 ? 7 : -7), cz + uz * L * 0.35 + pz * (i % 2 ? 7 : -7)); }
+    else if (st === 'guerrilla') { action = half ? 'engage' : 'cover'; moveTo = half ? P(tgt.x - ux * 18 + px * 10 * (i % 2 ? 1 : -1), tgt.z - uz * 18 + pz * 10 * (i % 2 ? 1 : -1)) : P(m.x + px * 14 * (i % 2 ? 1 : -1), m.z + pz * 14 * (i % 2 ? 1 : -1)); }
+    else if (st === 'suppress') { const lead = (i + Math.floor(snap.t / 10)) % sq.length === 0; action = lead ? 'hold' : 'flank'; moveTo = lead ? P(m.x, m.z) : P(tgt.x - ux * 10 + px * 8 * (i % 2 ? 1 : -1), tgt.z - uz * 10 + pz * 8 * (i % 2 ? 1 : -1)); }
+    else if (st === 'beastlure' && snap.creature) { action = 'lure'; const kx = tgt.x - snap.creature.x, kz = tgt.z - snap.creature.z, kl = Math.hypot(kx, kz) || 1; moveTo = P(tgt.x + kx / kl * 14, tgt.z + kz / kl * 14); }
+    if (m.hp < 25 && st !== 'blitz') { action = 'retreat'; moveTo = P(m.x - ux * 20, m.z - uz * 20); }
+    return { id: m.id, action, target: tgt.id, moveTo, say: i === 0 || Math.random() < 0.25 ? line() : '' };
+  });
+  const intent = { blitz: `Rushing ${tgt.name} head-on.`, pincer: `Closing on ${tgt.name} from both sides.`, overwatch: `Covering ${tgt.name}'s approach from long range.`, ambush: `Lying in wait on ${tgt.name}'s route.`,
+    guerrilla: half ? `Striking ${tgt.name}, then fading.` : 'Breaking contact to reposition.', suppress: `Pinning ${tgt.name} while the rest advance.`, beastlure: snap.creature ? `Dragging ${snap.creature.name} onto ${tgt.name}.` : `Pressing ${tgt.name}.` }[st] || '';
+  return { orders, intent };
+}
