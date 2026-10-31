@@ -57,7 +57,7 @@ flowchart TB
         end
         ACT --> WS["World state<br/>health, kills, creature,<br/>scripted events"]
         WS --> PER
-        WS -->|"each squad's own view<br/>every ~16-24 s"| SUB{{"Strategy subagents · Claude<br/>one per squad: blitz, pincer, overwatch,<br/>ambush, hit and run, suppress, beast bait"}}
+        WS -->|"each squad's own view<br/>every ~16-24 s"| SUB{{"Strategy subagents · Claude<br/>one per squad, 7 doctrines<br/>(detail in the next diagram)"}}
         SUB -->|"orders, moveTo positions,<br/>radio lines"| NO["normalizeSubOrders()"]
         SUB -. unavailable .-> OFF2["Offline doctrine<br/>same strategy as geometry"] --> NO
         NO -->|order biases decisions| DEC
@@ -70,6 +70,37 @@ flowchart TB
         END -->|won or lost| STATS["Debrief stats<br/>kills, accuracy, time, health left"]
         STATS --> NEXT(["Next level: stats + history<br/>become the director's new context"])
     end
+```
+
+### Strategy subagents
+
+The World Director gives every operator an attack strategy. Operators on the same side who share one form a squad, and each squad gets its own Claude subagent. A subagent only knows what its own squad has perceived, and it answers with an order, a target, an exact position and a radio line for each member. Seven doctrines are available: Shock Assault, Pincer, Overwatch, Ambush, Hit and Run, Suppress and Advance, and Beast Baiters. The example below shows a team-deathmatch level with four squads.
+
+```mermaid
+flowchart LR
+    DIR{{"World Director · Claude"}} -->|"assigns each operator<br/>a role + attack strategy"| CAST["Cast<br/>e.g. 8 operators, team deathmatch"]
+
+    CAST --> SQ1 & SQ2 & SQ3 & SQ4
+
+    subgraph ALLY["Player's side (team A)"]
+        direction TB
+        SQ1["Squad · Overwatch<br/>Raven, Havoc"] <-->|"perception up<br/>orders down"| AG1{{"Overwatch subagent"}}
+        SQ2["Squad · Pincer<br/>Mako, Talon"] <-->|"perception up<br/>orders down"| AG2{{"Pincer subagent"}}
+    end
+
+    subgraph HOST["Hostile side (team H)"]
+        direction TB
+        SQ3["Squad · Shock Assault<br/>Onyx, Jinx"] <-->|"perception up<br/>orders down"| AG3{{"Shock Assault subagent"}}
+        SQ4["Squad · Beast Baiters<br/>Dusk, Hex"] <-->|"perception up<br/>orders down"| AG4{{"Beast Baiters subagent"}}
+    end
+
+    subgraph EACH["Every subagent turn"]
+        direction TB
+        IN["Input: its squad only<br/>members' position, health, ammo, morale<br/>enemies they have seen + how long ago<br/>allies, the creature, recent events"] --> THINK["Apply the doctrine<br/>to this exact situation"] --> OUT["Output per operator<br/>action, target, moveTo x/z,<br/>radio line in their voice<br/>+ one-line squad intent"]
+    end
+
+    AG1 & AG2 & AG3 & AG4 -.-> EACH
+    OUT --> BR["NPC brains<br/>follow the order, shaped by the<br/>doctrine's range, speed, fire discipline"]
 ```
 
 ### Where the Claude calls go
