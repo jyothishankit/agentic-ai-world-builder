@@ -1,5 +1,7 @@
 # Killhouse: an agentic AI world builder
 
+Demo link: https://www.youtube.com/watch?v=X0oEfGyjB8Y
+
 A cinematic, first-person 3D shooter in the browser (three.js / WebGL). Every level is staged like a different film, and three layers of AI run it:
 
 | Agent | Runs | What it decides |
